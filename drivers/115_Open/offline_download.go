@@ -87,12 +87,14 @@ type offlineTorrentInfo struct {
 
 func (d *Driver) OfflineDownloadCapabilities() driver.OfflineDownloadCapabilities {
 	return driver.OfflineDownloadCapabilities{
-		SupportsURLs:      true,
-		SupportsBatchURLs: true,
-		SupportsTorrent:   true,
-		URLSchemes:        []string{"http", "https", "ftp", "magnet", "ed2k"},
-		RootTargetAllowed: true,
-		RemoteDelete:      true,
+		SupportsURLs:       true,
+		SupportsBatchURLs:  true,
+		SupportsTorrent:    true,
+		SupportsShareLinks: true,
+		ShareLinkHosts:     []string{"115.com", "anxia.com", "115cdn.com"},
+		URLSchemes:         []string{"http", "https", "ftp", "magnet", "ed2k"},
+		RootTargetAllowed:  true,
+		RemoteDelete:       true,
 	}
 }
 

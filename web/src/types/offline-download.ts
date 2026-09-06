@@ -3,6 +3,8 @@ export interface OfflineDownloadCapabilities {
   supports_urls: boolean;
   supports_batch_urls: boolean;
   supports_torrent: boolean;
+  supports_share_links: boolean;
+  share_link_hosts?: string[];
   url_schemes: string[];
   root_target_allowed: boolean;
   remote_delete: boolean;
@@ -36,7 +38,7 @@ export interface OfflineDownloadTask {
   driver_type: string;
   provider_kind?: "native" | "builtin";
   executor_type?: string;
-  source_kind: "url" | "bt";
+  source_kind: "url" | "bt" | "share";
   source: string;
   name: string;
   provider_task_id?: string;
@@ -57,6 +59,22 @@ export interface OfflineDownloadTask {
   remote_delete: boolean;
   created_at: number;
   updated_at: number;
+}
+
+export interface OfflineShareFile {
+  id: string;
+  name: string;
+  size: number;
+  is_dir: boolean;
+  wanted: boolean;
+}
+
+export interface OfflineSharePreparation {
+  preparation_id: string;
+  name: string;
+  total_size: number;
+  files: OfflineShareFile[];
+  expires_at: number;
 }
 
 export interface OfflineTorrentFile {
