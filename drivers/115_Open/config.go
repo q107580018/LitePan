@@ -48,6 +48,7 @@ func (f flexNumber) int64() int64 {
 type Addition struct {
 	AccessToken  string     `json:"access_token" label:"访问令牌 access_token" type:"password" form:"required,pair=auth"`
 	RefreshToken string     `json:"refresh_token" label:"刷新令牌 refresh_token" type:"password" form:"required,pair=auth"`
+	ShareCookie  string     `json:"share_cookie" label:"网页版 Cookie（分享转存）" type:"password" form:"full"`
 	DownloadMode string     `json:"download_mode" label:"下载模式" type:"select" options:"redirect:302重定向,proxy:本机代理" default:"redirect" form:"pair=opts2"`
 	DeleteMode   string     `json:"delete_mode" label:"删除模式" type:"select" options:"trash:移到回收站,delete:永久删除" default:"trash" form:"pair=opts2"`
 	RootFolderID string     `json:"root_folder_id" label:"根目录ID（默认 0）" default:"0" form:"pair=opts1"`

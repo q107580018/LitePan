@@ -71,7 +71,53 @@
 
 ## ▎ 挂载与更多功能
 
-支持 WebDAV 与 FUSE 本地挂载，另有 302 直链、缓存保持、命名对齐、离线下载等能力。
+支持 WebDAV 与 FUSE 本地挂载，另有 302 直链、缓存保持、命名对齐、HTTP/磁力离线下载，以及 115/夸克分享链接转存等能力。
+
+## ▎ 离线下载与分享转存
+
+LitePan 的“离线下载”入口同时提供链接任务、BT 种子和分享转存。分享转存会直接调用对应网盘的转存接口，不经过本地下载和重新上传。
+
+### 支持范围
+
+| 网盘 | 普通离线下载 | 分享链接转存 | 认证要求 |
+| --- | --- | --- | --- |
+| 115 网盘 Open | HTTP / HTTPS / FTP / Magnet / ED2K / BT | `115.com`、`anxia.com`、`115cdn.com` | Open OAuth；分享转存还需网页版 Cookie |
+| 夸克网盘 | 使用 LitePan 内置下载器处理 HTTP / HTTPS / Magnet | `pan.quark.cn` | 账号 Cookie |
+| 123 云盘 Open | HTTP / HTTPS | 暂未支持 | Open API 凭据 |
+| 光鸭云盘 | HTTP / HTTPS / FTP / Thunder / Magnet | 暂未支持 | 账号凭据 |
+| 其他支持上传的网盘 | 使用 LitePan 内置下载器处理 HTTP / HTTPS / Magnet | 暂未支持 | 对应账号凭据 |
+
+分享链接只能转存到相同网盘类型的当前账号。例如，夸克分享链接需要先在文件浏览器中选择夸克账号。
+
+### 使用流程
+
+1. 在文件浏览器中选择目标网盘账号，进入准备保存文件的目录。
+2. 点击工具栏中的“离线下载”，切换到“分享转存”。
+3. 粘贴分享链接或完整分享文案；提取码可单独填写，也可从“提取码、访问码、密码、`pwd`、`password`、`passcode`”等文本自动识别。
+4. 点击“解析分享链接”。LitePan 会读取分享根目录并默认勾选全部项目。
+5. 调整需要转存的文件或文件夹，确认保存位置后点击“转存已选内容”。
+6. 115 转存成功后立即刷新目标目录；夸克异步转存会先进入任务列表，并由离线任务轮询更新最终状态。
+
+当前分享预览展示分享根目录中的文件和文件夹。选中一个文件夹时，由网盘服务端递归转存其中内容；暂不提供在分享目录内部逐层浏览的界面。
+
+### 115 分享 Cookie
+
+`115_Open` 的常规文件操作和原生离线下载使用 OAuth Token，但 `webapi.115.com` 分享接收接口使用网页版 Cookie。使用 115 分享转存前，请编辑对应的 115 Open 账号，在“网页版 Cookie（分享转存）”中填写当前账号的完整网页版 Cookie。
+
+Cookie 属于敏感凭据，请仅保存在自己的 LitePan 实例中。Cookie 失效后需要重新登录 115 网页版并更新账号配置。
+
+### 接口与状态
+
+分享转存采用两阶段接口：
+
+```text
+POST /api/files/offline-download/share/prepare
+POST /api/files/offline-download/share
+```
+
+`prepare` 只向前端返回短期 `preparation_id` 和可选择的文件列表。夸克 `stoken`、`share_fid_token` 与 115 分享参数保存在服务端内存中，绑定解析时使用的账号，并在 30 分钟后过期。转存任务记录只保存规范化分享 URL，不保存提取码或完整分享文案。
+
+分享转存完成后会进入现有离线任务记录，并触发目录缓存失效、文件列表刷新和“离线下载完成”自动联动。空选择、过期 preparation、账号不匹配和重复提交都会返回校验错误。
 
 ---
 
@@ -116,6 +162,18 @@ services:
 > [!WARNING]
 > **不要用 `ponphil/litepan:latest` 部署本仓库对应的 Go 版。**  
 > `latest` 仍是 Python 旧版镜像。若你需要旧版程序与 Compose 脚本，请前往归档仓库：[LitePan-old](https://github.com/Ponphil/LitePan-old)。
+
+### 从本仓库的 GHCR 拉取自建镜像
+
+本仓库 push 到 `main` 后会自动构建并发布多架构（amd64/arm64）镜像到 GitHub Container Registry。直接拉取：
+
+```bash
+docker pull ghcr.io/q107580018/litepan:latest
+```
+
+将上方 Compose 中的 `image: ponphil/litepan:beta` 换成 `ghcr.io/q107580018/litepan:latest` 即可使用本仓库对应代码的镜像（新功能以本仓库为准，如 115 / 夸克分享转存）。
+
+手动触发构建：在仓库 **Actions → docker-publish → Run workflow**。
 
 ## ▎ 支持
 
