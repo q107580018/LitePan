@@ -231,6 +231,7 @@ export function useOfflineDownloads(deps: Deps) {
   function sourceLabel(task: OfflineDownloadTask) {
     const providerPrefix = task.provider_kind === "builtin" ? "内置" : "原生";
     if (task.source_kind === "bt") return "BT";
+    if (task.source_kind === "share") return "分享转存";
     try {
       return `${providerPrefix} ${new URL(task.source).protocol.replace(":", "").toUpperCase()}`;
     } catch {

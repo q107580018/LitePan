@@ -21,6 +21,20 @@ type addOfflineURLsReq struct {
 	TargetDisplayPath string   `json:"target_display_path"`
 }
 
+type prepareOfflineShareReq struct {
+	AccountID int64  `json:"account_id"`
+	Link      string `json:"link"`
+	Passcode  string `json:"passcode"`
+}
+
+type addOfflineShareReq struct {
+	AccountID         int64    `json:"account_id"`
+	PreparationID     string   `json:"preparation_id"`
+	FileIDs           []string `json:"file_ids"`
+	TargetParentID    string   `json:"target_parent_id"`
+	TargetDisplayPath string   `json:"target_display_path"`
+}
+
 type addOfflineTorrentReq struct {
 	AccountID         int64  `json:"account_id"`
 	PreparationID     string `json:"preparation_id"`
@@ -69,6 +83,39 @@ func (h *Handler) addOfflineURLs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, Resp{Success: true, Message: "离线下载任务已提交", Data: tasks})
+}
+
+func (h *Handler) prepareOfflineShare(w http.ResponseWriter, r *http.Request) {
+	var req prepareOfflineShareReq
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, err)
+		return
+	}
+	preparation, err := h.offlineDownloads.PrepareShare(r.Context(), offlinedownload.PrepareShareParams{
+		AccountID: req.AccountID, Link: req.Link, Passcode: req.Passcode,
+	})
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, Resp{Success: true, Message: "分享链接解析成功", Data: preparation})
+}
+
+func (h *Handler) addOfflineShare(w http.ResponseWriter, r *http.Request) {
+	var req addOfflineShareReq
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, err)
+		return
+	}
+	task, err := h.offlineDownloads.AddShare(r.Context(), offlinedownload.AddShareParams{
+		AccountID: req.AccountID, PreparationID: req.PreparationID, FileIDs: req.FileIDs,
+		TargetParentID: req.TargetParentID, TargetDisplayPath: req.TargetDisplayPath,
+	})
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, Resp{Success: true, Message: "分享链接转存完成", Data: task})
 }
 
 func (h *Handler) prepareOfflineTorrent(w http.ResponseWriter, r *http.Request) {

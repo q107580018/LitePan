@@ -476,6 +476,8 @@ func NewRouter(d Deps) http.Handler {
 				r.Route("/offline-download", func(r chi.Router) {
 					r.Get("/capabilities", h.offlineDownloadCapabilities)
 					r.Post("/urls", h.addOfflineURLs)
+					r.Post("/share/prepare", h.prepareOfflineShare)
+					r.Post("/share", h.addOfflineShare)
 					r.Post("/torrent/prepare", h.prepareOfflineTorrent)
 					r.Post("/torrent", h.addOfflineTorrent)
 					r.Get("/tasks", h.listOfflineDownloadTasks)

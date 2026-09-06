@@ -147,4 +147,7 @@ var (
 	_ driver.ConnectionErrorExplainer = (*Driver)(nil)
 	_ driver.RequestIntervalConsumer  = (*Driver)(nil)
 	_ driver.QRLoginProvider          = (*Driver)(nil)
+	_ driver.OfflineDownloadProvider  = (*Driver)(nil)
+	_ driver.OfflineShareProvider     = (*Driver)(nil)
+	_ driver.OfflineTaskRefresher     = (*Driver)(nil)
 )

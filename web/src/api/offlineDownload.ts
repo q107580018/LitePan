@@ -4,6 +4,7 @@ import type {
   OfflineBatchDeleteResult,
   OfflineDownloadCapabilities,
   OfflineDownloadTask,
+  OfflineSharePreparation,
   OfflineTorrentPreparation,
 } from "@/types/offline-download";
 
@@ -12,6 +13,20 @@ export interface AddOfflineURLsPayload {
   provider_kind?: "native" | "builtin";
   urls: string[];
   file_name?: string;
+  target_parent_id: string;
+  target_display_path: string;
+}
+
+export interface PrepareOfflineSharePayload {
+  account_id: number;
+  link: string;
+  passcode?: string;
+}
+
+export interface AddOfflineSharePayload {
+  account_id: number;
+  preparation_id: string;
+  file_ids: string[];
   target_parent_id: string;
   target_display_path: string;
 }
@@ -47,6 +62,14 @@ export const offlineDownloadApi = {
 
   addURLs(payload: AddOfflineURLsPayload) {
     return http.post<OfflineDownloadTask[]>("/files/offline-download/urls", payload);
+  },
+
+  prepareShare(payload: PrepareOfflineSharePayload) {
+    return http.post<OfflineSharePreparation>("/files/offline-download/share/prepare", payload);
+  },
+
+  addShare(payload: AddOfflineSharePayload) {
+    return http.post<OfflineDownloadTask>("/files/offline-download/share", payload);
   },
 
   prepareTorrent(accountId: number, file: File) {

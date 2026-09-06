@@ -4,7 +4,7 @@ import { offlineDownloadApi } from "@/api/offlineDownload";
 import { getApiErrorMessage } from "@/api/client";
 import { toast } from "@/composables/useToast";
 import { formatSize } from "@/utils/format";
-import type { OfflineDownloadCapabilities, OfflineDownloadTask, OfflineTorrentPreparation } from "@/types/offline-download";
+import type { OfflineDownloadCapabilities, OfflineDownloadTask, OfflineSharePreparation, OfflineTorrentPreparation } from "@/types/offline-download";
 import type { Crumb } from "@/stores/browser";
 import AppModal from "@/components/base/AppModal.vue";
 import AppButton from "@/components/base/AppButton.vue";
@@ -27,9 +27,14 @@ const emit = defineEmits<{
   created: [tasks: OfflineDownloadTask[]];
 }>();
 
-const sourceMode = ref<"url" | "bt">("url");
+const sourceMode = ref<"url" | "bt" | "share">("url");
 const providerKind = ref<"native" | "builtin">("native");
 const urlText = ref("");
+const shareText = ref("");
+const sharePasscode = ref("");
+const sharePreparation = ref<OfflineSharePreparation | null>(null);
+const selectedShareFileIds = ref<string[]>([]);
+const parsingShare = ref(false);
 const fileName = ref("");
 const targetParentId = ref("");
 const targetDisplayPath = ref("/");
@@ -41,13 +46,16 @@ const selectedTorrentIndexes = ref<number[]>([]);
 const torrentInput = ref<HTMLInputElement | null>(null);
 
 const nativeSupportsUrls = computed(() => Boolean(props.capability?.supports_urls));
+const supportsShareLinks = computed(() => Boolean(props.capability?.supports_share_links));
+const shareLinkHostText = computed(() => props.capability?.share_link_hosts?.join(" / ") || "当前网盘");
 const supportsBuiltin = computed(() => Boolean(props.capability?.builtin_enabled));
-const showProviderPicker = computed(() => supportsBuiltin.value && nativeSupportsUrls.value);
+const showProviderPicker = computed(() => sourceMode.value !== "share" && supportsBuiltin.value && nativeSupportsUrls.value);
 const supportsTorrent = computed(() => providerKind.value === "native" && Boolean(props.capability?.supports_torrent));
-const availableSourceModes = computed<("url" | "bt")[]>(() => {
-  const modes: ("url" | "bt")[] = [];
-  if (providerKind.value === "builtin" || nativeSupportsUrls.value) modes.push("url");
+const availableSourceModes = computed<("url" | "bt" | "share")[]>(() => {
+  const modes: ("url" | "bt" | "share")[] = [];
+  if (supportsBuiltin.value || nativeSupportsUrls.value) modes.push("url");
   if (supportsTorrent.value) modes.push("bt");
+  if (supportsShareLinks.value) modes.push("share");
   return modes.length ? modes : ["url"];
 });
 const showModeRail = computed(() => availableSourceModes.value.length > 1);
@@ -73,25 +81,58 @@ const selectedTorrentSize = computed(() =>
 const allTorrentSelected = computed(
   () => Boolean(torrentPreparation.value?.files.length) && selectedTorrentFiles.value.length === torrentPreparation.value?.files.length,
 );
+const selectedShareFiles = computed(() => {
+  const selected = new Set(selectedShareFileIds.value);
+  return sharePreparation.value?.files.filter((file) => selected.has(file.id)) ?? [];
+});
+const selectedShareSize = computed(() => selectedShareFiles.value.reduce((sum, file) => sum + file.size, 0));
+const allShareSelected = computed(
+  () => Boolean(sharePreparation.value?.files.length) && selectedShareFiles.value.length === sharePreparation.value?.files.length,
+);
 const submitDisabled = computed(() => {
   if (submitting.value || !props.accountId) return true;
   if (sourceMode.value === "bt") return !torrentPreparation.value || selectedTorrentIndexes.value.length === 0;
+  if (sourceMode.value === "share") {
+    if (!sharePreparation.value) return shareText.value.trim().length === 0 || parsingShare.value;
+    return selectedShareFileIds.value.length === 0;
+  }
   return urlLines.value.length === 0;
 });
+
+let sharePrepareRequest = 0;
 
 watch(
   () => props.open,
   (open) => {
     if (!open) return;
+    sharePrepareRequest += 1;
     providerKind.value = supportsBuiltin.value && !nativeSupportsUrls.value ? "builtin" : "native";
     sourceMode.value = "url";
     urlText.value = "";
+    shareText.value = "";
+    sharePasscode.value = "";
+    sharePreparation.value = null;
+    selectedShareFileIds.value = [];
     fileName.value = "";
     torrentPreparation.value = null;
     selectedTorrentIndexes.value = [];
     initTarget();
   },
   { immediate: true },
+);
+
+watch(
+  () => props.accountId,
+  (accountId, previous) => {
+    if (!props.open || accountId === previous) return;
+    sharePrepareRequest += 1;
+    parsingShare.value = false;
+    sharePreparation.value = null;
+    selectedShareFileIds.value = [];
+    providerKind.value = supportsBuiltin.value && !nativeSupportsUrls.value ? "builtin" : "native";
+    sourceMode.value = "url";
+    initTarget();
+  },
 );
 
 watch(availableSourceModes, (modes) => {
@@ -175,8 +216,55 @@ function toggleAllTorrentFiles() {
     : torrentPreparation.value.files.map((item) => item.index);
 }
 
-function selectSourceMode(mode: "url" | "bt") {
+function toggleAllShareFiles() {
+  if (!sharePreparation.value) return;
+  selectedShareFileIds.value = allShareSelected.value ? [] : sharePreparation.value.files.map((item) => item.id);
+}
+
+function toggleShareFile(id: string) {
+  const selected = new Set(selectedShareFileIds.value);
+  if (selected.has(id)) selected.delete(id);
+  else selected.add(id);
+  selectedShareFileIds.value = [...selected];
+}
+
+function resetSharePreparation() {
+  sharePrepareRequest += 1;
+  parsingShare.value = false;
+  sharePreparation.value = null;
+  selectedShareFileIds.value = [];
+}
+
+async function prepareShare() {
+  if (!props.accountId || !shareText.value.trim() || parsingShare.value) return;
+  const accountId = props.accountId;
+  const request = ++sharePrepareRequest;
+  parsingShare.value = true;
+  try {
+    const result = await offlineDownloadApi.prepareShare({
+      account_id: accountId,
+      link: shareText.value.trim(),
+      passcode: sharePasscode.value.trim() || undefined,
+    });
+    if (request !== sharePrepareRequest || props.accountId !== accountId) return;
+    sharePreparation.value = result;
+    selectedShareFileIds.value = result.files.filter((item) => item.wanted).map((item) => item.id);
+    if (!selectedShareFileIds.value.length) selectedShareFileIds.value = result.files.map((item) => item.id);
+    toast.success(`已解析 ${result.files.length} 个分享项目`);
+  } catch (error) {
+    if (request === sharePrepareRequest && props.accountId === accountId) {
+      toast.error(getApiErrorMessage(error, "分享链接解析失败"));
+    }
+  } finally {
+    if (request === sharePrepareRequest) parsingShare.value = false;
+  }
+}
+
+function selectSourceMode(mode: "url" | "bt" | "share") {
   if (mode === "bt" && !supportsTorrent.value) return;
+  if (mode === "share" && !supportsShareLinks.value) return;
+  if (mode === "share") providerKind.value = "native";
+  if (mode === "url" && !nativeSupportsUrls.value && supportsBuiltin.value) providerKind.value = "builtin";
   sourceMode.value = mode;
 }
 
@@ -184,11 +272,17 @@ async function submit() {
   if (!props.accountId || submitDisabled.value) return;
   const accountId = props.accountId;
   const mode = sourceMode.value;
+  if (mode === "share" && !sharePreparation.value) {
+    await prepareShare();
+    return;
+  }
   const nextProviderKind = providerKind.value;
   const nextTargetParentId = targetParentId.value;
   const nextTargetDisplayPath = targetDisplayPath.value;
   const nextFileName = fileName.value.trim() || undefined;
   const nextURLs = [...urlLines.value];
+  const nextSharePreparation = sharePreparation.value;
+  const nextShareFileIds = [...selectedShareFileIds.value];
   const nextTorrentPreparation = torrentPreparation.value;
   const nextWanted = [...selectedTorrentIndexes.value];
   submitting.value = true;
@@ -207,6 +301,18 @@ async function submit() {
       });
       emit("created", [task]);
       toast.success("BT 离线下载任务已提交");
+    } else if (mode === "share") {
+      if (!nextSharePreparation) return;
+      const task = await offlineDownloadApi.addShare({
+        account_id: accountId,
+        preparation_id: nextSharePreparation.preparation_id,
+        file_ids: nextShareFileIds,
+        target_parent_id: nextTargetParentId,
+        target_display_path: nextTargetDisplayPath,
+      });
+      emit("created", [task]);
+      if (task.status === "success") toast.success("分享链接转存完成");
+      else toast.success("分享转存任务已提交");
     } else {
       const tasks = await offlineDownloadApi.addURLs({
         account_id: accountId,
@@ -222,7 +328,7 @@ async function submit() {
       else toast.success(`${tasks.length} 个离线下载任务已提交`);
     }
   } catch (error) {
-    toast.error(getApiErrorMessage(error, "离线下载任务提交失败"));
+    toast.error(getApiErrorMessage(error, mode === "share" ? "分享链接转存失败" : "离线下载任务提交失败"));
   } finally {
     submitting.value = false;
   }
@@ -235,10 +341,12 @@ async function submit() {
       <div class="offline-capability">
         <span class="offline-capability__icon"><SvgIcon name="cloud" :size="24" /></span>
         <span class="offline-capability__body">
-          <strong v-if="providerKind === 'builtin'">{{ accountName }}可使用内置下载器处理 HTTP/HTTPS 链接</strong>
+          <strong v-if="sourceMode === 'share'">{{ accountName }}支持分享链接直接转存</strong>
+          <strong v-else-if="providerKind === 'builtin'">{{ accountName }}可使用内置下载器处理 HTTP/HTTPS 链接</strong>
           <strong v-else-if="supportsTorrent">{{ accountName }}支持链接和 BT 种子任务</strong>
           <strong v-else>{{ accountName }}支持 HTTP/HTTPS 离线下载</strong>
-          <small v-if="providerKind === 'builtin'">下载完成后会自动交给上传任务继续入盘。</small>
+          <small v-if="sourceMode === 'share'">解析分享根目录后，可选择需要保存的文件和文件夹。</small>
+          <small v-else-if="providerKind === 'builtin'">下载完成后会自动交给上传任务继续入盘。</small>
           <small v-else-if="supportsTorrent">链接可以批量提交；BT 种子解析后可选择下载内容。</small>
           <small v-else>官方接口一次创建一个任务，根目录会使用网盘默认的“来自:离线下载”。</small>
         </span>
@@ -265,6 +373,17 @@ async function submit() {
             <span class="offline-mode-btn__vertical">链接任务</span>
           </button>
           <button
+            v-if="supportsShareLinks"
+            type="button"
+            class="offline-mode-btn"
+            :class="{ active: sourceMode === 'share' }"
+            title="分享转存"
+            @click="selectSourceMode('share')"
+          >
+            <span class="offline-mode-btn__vertical">分享转存</span>
+          </button>
+          <button
+            v-if="supportsTorrent"
             type="button"
             class="offline-mode-btn"
             :class="{ active: sourceMode === 'bt' }"
@@ -278,9 +397,17 @@ async function submit() {
         <div class="offline-mode-panel">
           <div class="offline-mode-panel__head">
             <div class="offline-mode-panel__title-row">
-              <strong>{{ sourceMode === "url" ? "下载链接" : "BT 种子" }}</strong>
+              <strong>{{ sourceMode === "url" ? "下载链接" : sourceMode === "share" ? "分享链接" : "BT 种子" }}</strong>
               <button
-                v-if="sourceMode === 'bt' && torrentPreparation"
+                v-if="sourceMode === 'share' && sharePreparation"
+                type="button"
+                class="offline-mode-panel__action"
+                @click="resetSharePreparation"
+              >
+                重新解析
+              </button>
+              <button
+                v-else-if="sourceMode === 'bt' && torrentPreparation"
                 type="button"
                 class="offline-mode-panel__action"
                 @click="torrentPreparation = null; selectedTorrentIndexes = []"
@@ -288,7 +415,13 @@ async function submit() {
                 重新选择
               </button>
             </div>
-            <small v-if="sourceMode === 'url'">
+            <div v-if="sourceMode === 'share'" class="offline-mode-panel__meta-row">
+              <small>{{ sharePreparation ? "已解析分享内容，可选择转存项目" : `支持 ${shareLinkHostText}，提取码可自动识别` }}</small>
+              <small v-if="sharePreparation">
+                已选择 {{ selectedShareFiles.length }} 项，共 {{ formatSize(selectedShareSize) }}
+              </small>
+            </div>
+            <small v-else-if="sourceMode === 'url'">
               支持 {{ supportedSchemeText }}
               <template v-if="supportsBatchUrls">，当前 {{ urlLines.length }} 条</template>
               <template v-if="providerKind === 'builtin'">，下载完成后自动转入上传</template>
@@ -315,6 +448,39 @@ async function submit() {
                 <span class="offline-field__label">自定义文件名 <em>可选</em></span>
                 <AppInput v-model="fileName" placeholder="留空时由 123 云盘识别文件名；自定义时请手动填写后缀名" />
               </label>
+            </template>
+
+            <template v-else-if="sourceMode === 'share'">
+              <template v-if="!sharePreparation">
+                <label class="offline-field">
+                  <textarea
+                    v-model="shareText"
+                    class="offline-textarea"
+                    placeholder="粘贴分享链接或完整分享文案"
+                    :rows="4"
+                  />
+                </label>
+                <label class="offline-field">
+                  <span class="offline-field__label">提取码 <em>可选</em></span>
+                  <AppInput v-model="sharePasscode" placeholder="留空时自动从链接或分享文案识别" />
+                </label>
+              </template>
+              <div v-else class="offline-torrent-result">
+                <div class="offline-torrent-files">
+                  <label class="offline-torrent-file offline-torrent-file--head">
+                    <input type="checkbox" :checked="allShareSelected" @change="toggleAllShareFiles" />
+                    <span>选择转存内容</span><span>大小</span>
+                  </label>
+                  <label v-for="file in sharePreparation.files" :key="file.id" class="offline-torrent-file">
+                    <input
+                      type="checkbox"
+                      :checked="selectedShareFileIds.includes(file.id)"
+                      @change="toggleShareFile(file.id)"
+                    />
+                    <span :title="file.name">{{ file.name }}</span><span>{{ file.is_dir ? "文件夹" : formatSize(file.size) }}</span>
+                  </label>
+                </div>
+              </div>
             </template>
 
             <template v-else>
@@ -363,7 +529,7 @@ async function submit() {
     <template #footer>
       <AppButton variant="primary" :disabled="submitDisabled" @click="submit">
         <SvgIcon name="cloud" :size="17" />
-        {{ submitting ? "正在提交…" : "开始离线下载" }}
+        {{ submitting ? "正在提交…" : sourceMode === "share" ? (sharePreparation ? "转存已选内容" : parsingShare ? "正在解析…" : "解析分享链接") : "开始离线下载" }}
       </AppButton>
     </template>
   </AppModal>
@@ -437,7 +603,7 @@ async function submit() {
   position: relative;
   flex: 1;
   display: flex; align-items: center; justify-content: center; width: 100%;
-  min-height: 102px; padding: 8px 4px; border: 0;
+  min-height: 72px; padding: 8px 4px; border: 0;
   border-radius: 0;
   background: var(--surface-sunken);
   color: var(--text-regular);

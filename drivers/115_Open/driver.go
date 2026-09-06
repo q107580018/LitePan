@@ -234,4 +234,5 @@ var (
 	_ driver.OfflineTaskRefresher     = (*Driver)(nil)
 	_ driver.OfflineTaskDeleter       = (*Driver)(nil)
 	_ driver.OfflineTorrentDownloader = (*Driver)(nil)
+	_ driver.OfflineShareProvider     = (*Driver)(nil)
 )

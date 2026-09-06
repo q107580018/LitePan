@@ -45,9 +45,19 @@ type FolderCreator interface {
 	CreateFolder(ctx context.Context, accountID int64, parentID, name string) (*domain.FileItem, error)
 }
 
+type FileCreationNotifier interface {
+	NotifyCreated(ctx context.Context, accountID int64, parentID, fileID, fileName string, fileSize int64, isDir bool)
+}
+
 type preparedTorrent struct {
 	accountID int64
 	value     driver.OfflineTorrentPreparation
+	expiresAt time.Time
+}
+
+type preparedShare struct {
+	accountID int64
+	value     driver.OfflineSharePreparation
 	expiresAt time.Time
 }
 
@@ -56,6 +66,7 @@ type Service struct {
 	accounts domain.AccountRepository
 	repo     domain.OfflineDownloadTaskRepository
 	folders  FolderCreator
+	notifier FileCreationNotifier
 	settings *settings.Service
 	dataDir  string
 	bus      *eventbus.Bus
@@ -64,6 +75,7 @@ type Service struct {
 	mu                   sync.Mutex
 	tasks                map[string]*Task
 	prepared             map[string]preparedTorrent
+	preparedShares       map[string]preparedShare
 	lastRefresh          map[int64]time.Time
 	uploads              *upload.Manager
 	builtinRun           map[string]builtinRunState
@@ -85,17 +97,20 @@ type Service struct {
 
 func New(opts Options) *Service {
 	builtinRoot := builtinTempDir(opts.Settings, opts.DataDir)
+	notifier, _ := opts.Folders.(FileCreationNotifier)
 	s := &Service{
 		exec:            opts.Exec,
 		accounts:        opts.Accounts,
 		repo:            opts.Repo,
 		folders:         opts.Folders,
+		notifier:        notifier,
 		settings:        opts.Settings,
 		dataDir:         opts.DataDir,
 		bus:             opts.Bus,
 		log:             opts.Log,
 		tasks:           make(map[string]*Task),
 		prepared:        make(map[string]preparedTorrent),
+		preparedShares:  make(map[string]preparedShare),
 		lastRefresh:     make(map[int64]time.Time),
 		builtinRun:      make(map[string]builtinRunState),
 		builtinLimit:    builtinConcurrency(opts.Settings),
@@ -136,6 +151,8 @@ func (s *Service) Capabilities(ctx context.Context, accountID int64) (Capabiliti
 		SupportsURLs:           cap.SupportsURLs,
 		SupportsBatchURLs:      cap.SupportsBatchURLs,
 		SupportsTorrent:        cap.SupportsTorrent,
+		SupportsShareLinks:     cap.SupportsShareLinks,
+		ShareLinkHosts:         append([]string(nil), cap.ShareLinkHosts...),
 		URLSchemes:             append([]string(nil), cap.URLSchemes...),
 		RootTargetAllowed:      cap.RootTargetAllowed,
 		RemoteDelete:           cap.RemoteDelete,
@@ -144,6 +161,118 @@ func (s *Service) Capabilities(ctx context.Context, accountID int64) (Capabiliti
 		BuiltinURLSchemes:      builtinURLSchemes(),
 		BuiltinSupportsTorrent: false,
 	}, nil
+}
+
+// PrepareShare 解析分享链接，并把 provider token 等私有状态短期保存在服务端。
+func (s *Service) PrepareShare(ctx context.Context, p PrepareShareParams) (*SharePreparation, error) {
+	if p.AccountID <= 0 {
+		return nil, domain.Errorf(domain.CodeValidation, "非法 account_id")
+	}
+	link := strings.TrimSpace(p.Link)
+	if link == "" {
+		return nil, domain.Errorf(domain.CodeValidation, "分享链接不能为空")
+	}
+	var prep *driver.OfflineSharePreparation
+	err := s.exec.Run(ctx, p.AccountID, func(drv driver.Driver) error {
+		capability, err := driverexec.Require[driver.OfflineDownloadProvider](drv)
+		if err != nil || !capability.OfflineDownloadCapabilities().SupportsShareLinks {
+			return domain.Errorf(domain.CodeNotImplement, "当前网盘不支持分享链接转存")
+		}
+		provider, err := driverexec.Require[driver.OfflineShareProvider](drv)
+		if err != nil {
+			return domain.Errorf(domain.CodeNotImplement, "当前网盘不支持分享链接转存")
+		}
+		prep, err = provider.PrepareOfflineShare(ctx, driver.OfflineSharePrepareRequest{
+			Link: link, Passcode: strings.TrimSpace(p.Passcode),
+		})
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	if prep == nil || len(prep.Files) == 0 || prep.State == nil {
+		return nil, domain.Errorf(domain.CodeDriverError, "分享链接解析结果不完整")
+	}
+	if strings.TrimSpace(prep.Source) == "" {
+		prep.Source = sanitizeShareSource(link)
+	}
+	id := newID()
+	expires := time.Now().Add(preparationTTL)
+	s.mu.Lock()
+	s.cleanupPreparationsLocked(time.Now())
+	s.preparedShares[id] = preparedShare{accountID: p.AccountID, value: *prep, expiresAt: expires}
+	s.mu.Unlock()
+	return &SharePreparation{
+		PreparationID: id, Name: prep.Name, TotalSize: prep.TotalSize,
+		Files: append([]driver.OfflineShareFile(nil), prep.Files...), ExpiresAt: timeutil.UnixFloat(expires),
+	}, nil
+}
+
+// AddShare 转存 preparation 中选定的项目，并创建本地任务记录。
+func (s *Service) AddShare(ctx context.Context, p AddShareParams) (*Task, error) {
+	accountName, driverType, err := s.lookupAccount(ctx, p.AccountID)
+	if err != nil {
+		return nil, err
+	}
+	prepID := strings.TrimSpace(p.PreparationID)
+	s.mu.Lock()
+	s.cleanupPreparationsLocked(time.Now())
+	prepared, ok := s.preparedShares[prepID]
+	if ok && prepared.accountID == p.AccountID {
+		delete(s.preparedShares, prepID)
+	}
+	s.mu.Unlock()
+	if !ok || prepared.accountID != p.AccountID {
+		return nil, domain.Errorf(domain.CodeValidation, "分享链接解析结果已失效，请重新解析")
+	}
+	fileIDs, err := normalizeShareFileIDs(p.FileIDs, prepared.value.Files)
+	if err != nil {
+		s.restorePreparedShare(prepID, prepared)
+		return nil, err
+	}
+	var result *driver.OfflineShareResult
+	err = s.exec.Run(ctx, p.AccountID, func(drv driver.Driver) error {
+		provider, err := driverexec.Require[driver.OfflineShareProvider](drv)
+		if err != nil {
+			return domain.Errorf(domain.CodeNotImplement, "当前网盘不支持分享链接转存")
+		}
+		result, err = provider.SaveOfflineShare(ctx, driver.OfflineShareSaveRequest{
+			Preparation: prepared.value, FileIDs: fileIDs, ParentID: p.TargetParentID,
+		})
+		return err
+	})
+	if err != nil {
+		s.restorePreparedShare(prepID, prepared)
+		return nil, err
+	}
+	if result == nil {
+		s.restorePreparedShare(prepID, prepared)
+		return nil, domain.Errorf(domain.CodeDriverError, "网盘未返回转存结果")
+	}
+	if !result.Completed && strings.TrimSpace(result.ProviderTaskID) == "" {
+		s.restorePreparedShare(prepID, prepared)
+		return nil, domain.Errorf(domain.CodeDriverError, "网盘转存任务缺少任务 ID")
+	}
+	now := time.Now()
+	status, phase, progress := driver.OfflineStatusSuccess, PhaseDone, 100
+	if !result.Completed {
+		status, phase, progress = driver.OfflineStatusPending, "", 0
+	}
+	task := &Task{
+		TaskID: newID(), AccountID: p.AccountID, AccountName: accountName, DriverType: driverType,
+		ProviderKind: ProviderNative, SourceKind: SourceShare, Source: prepared.value.Source,
+		Name:           strutil.FirstNonEmpty(strings.TrimSpace(result.Name), prepared.value.Name, "分享文件"),
+		TargetParentID: p.TargetParentID, TargetDisplayPath: normalizeDisplayPath(p.TargetDisplayPath),
+		Status: status, Phase: phase, Progress: progress, Size: result.Size,
+		ProviderTaskID: result.ProviderTaskID, FileID: result.FileID, Message: strutil.FirstNonEmpty(strings.TrimSpace(result.Message), "分享链接转存完成"),
+		CreatedAt: timeutil.UnixFloat(now), UpdatedAt: timeutil.UnixFloat(now),
+	}
+	s.putTask(task)
+	if task.Status == driver.OfflineStatusSuccess {
+		s.notifyShareCompleted(task)
+	}
+	copy := *task
+	return &copy, nil
 }
 
 func (s *Service) AddURLs(ctx context.Context, p AddURLParams) ([]Task, error) {
@@ -587,6 +716,11 @@ func (s *Service) RemoveTasksByAccount(ctx context.Context, accountID int64) (in
 			delete(s.prepared, id)
 		}
 	}
+	for id, prep := range s.preparedShares {
+		if prep.accountID == accountID {
+			delete(s.preparedShares, id)
+		}
+	}
 	s.mu.Unlock()
 	for _, temp := range tempPaths {
 		s.removeBuiltinTaskTemp(temp.taskID, temp.localPath)
@@ -636,6 +770,9 @@ func (s *Service) applyUpdates(accountID int64, updates []driver.OfflineTaskUpda
 		}
 		task.Error = update.Error
 		task.UpdatedAt = timeutil.UnixFloat(time.Now())
+		if task.Status == driver.OfflineStatusSuccess && task.SourceKind == SourceShare {
+			task.Phase = PhaseDone
+		}
 		copy := *task
 		changed = append(changed, &copy)
 		if task.Status == driver.OfflineStatusSuccess {
@@ -647,6 +784,10 @@ func (s *Service) applyUpdates(accountID int64, updates []driver.OfflineTaskUpda
 		s.persist(task)
 	}
 	for _, task := range completed {
+		if task.SourceKind == SourceShare {
+			s.notifyShareCompleted(&task)
+			continue
+		}
 		if s.bus != nil {
 			s.bus.Publish(context.Background(), eventbus.FileMutated{
 				AccountID: task.AccountID,
@@ -665,6 +806,45 @@ func (s *Service) applyUpdates(accountID int64, updates []driver.OfflineTaskUpda
 			})
 		}
 	}
+}
+
+func (s *Service) notifyShareCompleted(task *Task) {
+	if task == nil {
+		return
+	}
+	if s.notifier != nil {
+		s.notifier.NotifyCreated(context.Background(), task.AccountID, task.TargetParentID, task.FileID, task.Name, task.Size, false)
+	} else if s.bus != nil {
+		s.bus.Publish(context.Background(), eventbus.FileMutated{AccountID: task.AccountID, Op: "offline_download", ParentID: task.TargetParentID, FileID: task.FileID, FileName: task.Name})
+	}
+	if s.bus != nil {
+		s.bus.Publish(context.Background(), eventbus.OfflineDownloadCompleted{TaskID: task.TaskID, AccountID: task.AccountID, TargetParentID: task.TargetParentID, TargetDisplayPath: task.TargetDisplayPath, FileID: task.FileID, FileName: task.Name})
+	}
+}
+
+func (s *Service) restorePreparedShare(id string, prepared preparedShare) {
+	if id == "" || !prepared.expiresAt.After(time.Now()) {
+		return
+	}
+	s.mu.Lock()
+	if _, exists := s.preparedShares[id]; !exists {
+		s.preparedShares[id] = prepared
+	}
+	s.mu.Unlock()
+}
+
+func sanitizeShareSource(raw string) string {
+	for _, field := range strings.Fields(raw) {
+		if !strings.HasPrefix(strings.ToLower(field), "http://") && !strings.HasPrefix(strings.ToLower(field), "https://") {
+			continue
+		}
+		if parsed, err := url.Parse(strings.TrimRight(field, "，。,.；;")); err == nil && parsed.Host != "" {
+			parsed.RawQuery = ""
+			parsed.Fragment = ""
+			return parsed.String()
+		}
+	}
+	return "分享链接"
 }
 
 func (s *Service) putTask(task *Task) {
@@ -722,6 +902,43 @@ func (s *Service) cleanupPreparationsLocked(now time.Time) {
 			delete(s.prepared, id)
 		}
 	}
+	for id, prep := range s.preparedShares {
+		if !prep.expiresAt.After(now) {
+			delete(s.preparedShares, id)
+		}
+	}
+}
+
+func normalizeShareFileIDs(requested []string, files []driver.OfflineShareFile) ([]string, error) {
+	available := make(map[string]struct{}, len(files))
+	for _, file := range files {
+		if id := strings.TrimSpace(file.ID); id != "" {
+			available[id] = struct{}{}
+		}
+	}
+	if len(requested) == 0 {
+		return nil, domain.Errorf(domain.CodeValidation, "请至少选择一个分享文件")
+	}
+	result := make([]string, 0, len(requested))
+	seen := make(map[string]struct{}, len(requested))
+	for _, raw := range requested {
+		id := strings.TrimSpace(raw)
+		if id == "" {
+			continue
+		}
+		if _, ok := available[id]; !ok {
+			return nil, domain.Errorf(domain.CodeValidation, "分享文件不存在或解析结果已变更")
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		result = append(result, id)
+	}
+	if len(result) == 0 {
+		return nil, domain.Errorf(domain.CodeValidation, "请至少选择一个分享文件")
+	}
+	return result, nil
 }
 
 func (t Task) ref() driver.OfflineTaskRef {
