@@ -4,12 +4,59 @@ import "context"
 
 // OfflineDownloadCapabilities 描述驱动原生离线下载能力，供公共层动态探测。
 type OfflineDownloadCapabilities struct {
-	SupportsURLs      bool     `json:"supports_urls"`
-	SupportsBatchURLs bool     `json:"supports_batch_urls"`
-	SupportsTorrent   bool     `json:"supports_torrent"`
-	URLSchemes        []string `json:"url_schemes"`
-	RootTargetAllowed bool     `json:"root_target_allowed"`
-	RemoteDelete      bool     `json:"remote_delete"`
+	SupportsURLs       bool     `json:"supports_urls"`
+	SupportsBatchURLs  bool     `json:"supports_batch_urls"`
+	SupportsTorrent    bool     `json:"supports_torrent"`
+	SupportsShareLinks bool     `json:"supports_share_links"`
+	ShareLinkHosts     []string `json:"share_link_hosts,omitempty"`
+	URLSchemes         []string `json:"url_schemes"`
+	RootTargetAllowed  bool     `json:"root_target_allowed"`
+	RemoteDelete       bool     `json:"remote_delete"`
+}
+
+// OfflineShareFile 是分享根目录下可选择转存的项目。
+type OfflineShareFile struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Size   int64  `json:"size"`
+	IsDir  bool   `json:"is_dir"`
+	Wanted bool   `json:"wanted"`
+}
+
+type OfflineSharePrepareRequest struct {
+	Link     string
+	Passcode string
+}
+
+// OfflineSharePreparation 的 State 只在服务端内存中保存，不返回前端。
+type OfflineSharePreparation struct {
+	Source    string
+	Name      string
+	TotalSize int64
+	Files     []OfflineShareFile
+	State     any
+}
+
+type OfflineShareSaveRequest struct {
+	Preparation OfflineSharePreparation
+	FileIDs     []string
+	ParentID    string
+}
+
+// OfflineShareResult 描述已转存到目标网盘的顶层内容。
+type OfflineShareResult struct {
+	Name           string
+	Size           int64
+	FileID         string
+	ProviderTaskID string
+	Completed      bool
+	Message        string
+}
+
+// OfflineShareProvider 由支持分享链接预解析和转存的驱动实现。
+type OfflineShareProvider interface {
+	PrepareOfflineShare(ctx context.Context, req OfflineSharePrepareRequest) (*OfflineSharePreparation, error)
+	SaveOfflineShare(ctx context.Context, req OfflineShareSaveRequest) (*OfflineShareResult, error)
 }
 
 // OfflineURLRequest 是链接离线下载的统一输入。

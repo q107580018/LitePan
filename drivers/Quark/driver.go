@@ -156,4 +156,7 @@ var (
 	_ driver.ShareCreator             = (*Driver)(nil)
 	_ driver.ShareLister              = (*Driver)(nil)
 	_ driver.ShareCanceller           = (*Driver)(nil)
+	_ driver.OfflineDownloadProvider  = (*Driver)(nil)
+	_ driver.OfflineShareProvider     = (*Driver)(nil)
+	_ driver.OfflineTaskRefresher     = (*Driver)(nil)
 )

@@ -2,7 +2,7 @@
 
 ARG DEBIAN_IMAGE=debian:bookworm-slim
 
-FROM node:20-bookworm-slim AS web
+FROM node:22-bookworm-slim AS web
 
 WORKDIR /src/web
 
@@ -18,7 +18,7 @@ FROM golang:1.26.6-bookworm AS build
 
 WORKDIR /src
 
-# 与 go.mod 的 go 1.26.4 对齐；local 禁止再去拉 toolchain，避免 proxy.golang.org 中断
+# 与 go.mod 的 go 1.26.6 对齐；local 禁止再去拉 toolchain，避免 proxy.golang.org 中断
 ENV GOTOOLCHAIN=local \
     CGO_ENABLED=0 \
     GOPROXY=https://goproxy.cn,direct
@@ -36,7 +36,7 @@ RUN go build -tags "${BUILD_TAGS}" -trimpath -ldflags="-s -w" -o /out/litepan ./
 FROM ${DEBIAN_IMAGE} AS runtime
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates tzdata fuse3 \
+    && apt-get install -y --no-install-recommends ca-certificates curl tzdata fuse3 \
     && sed -i 's/^#user_allow_other/user_allow_other/' /etc/fuse.conf 2>/dev/null || true \
     && grep -q '^user_allow_other' /etc/fuse.conf || echo user_allow_other >> /etc/fuse.conf \
     && rm -rf /var/lib/apt/lists/*

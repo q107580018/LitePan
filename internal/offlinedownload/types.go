@@ -5,6 +5,7 @@ import "litepan/internal/driver"
 const (
 	SourceURL     = "url"
 	SourceTorrent = "bt"
+	SourceShare   = "share"
 )
 
 const (
@@ -44,6 +45,8 @@ type Capabilities struct {
 	SupportsURLs           bool     `json:"supports_urls"`
 	SupportsBatchURLs      bool     `json:"supports_batch_urls"`
 	SupportsTorrent        bool     `json:"supports_torrent"`
+	SupportsShareLinks     bool     `json:"supports_share_links"`
+	ShareLinkHosts         []string `json:"share_link_hosts,omitempty"`
 	URLSchemes             []string `json:"url_schemes"`
 	RootTargetAllowed      bool     `json:"root_target_allowed"`
 	RemoteDelete           bool     `json:"remote_delete"`
@@ -107,6 +110,28 @@ type AddTorrentParams struct {
 	TargetParentID    string
 	TargetDisplayPath string
 	SavePath          string
+}
+
+type SharePreparation struct {
+	PreparationID string                    `json:"preparation_id"`
+	Name          string                    `json:"name"`
+	TotalSize     int64                     `json:"total_size"`
+	Files         []driver.OfflineShareFile `json:"files"`
+	ExpiresAt     float64                   `json:"expires_at"`
+}
+
+type PrepareShareParams struct {
+	AccountID int64
+	Link      string
+	Passcode  string
+}
+
+type AddShareParams struct {
+	AccountID         int64
+	PreparationID     string
+	FileIDs           []string
+	TargetParentID    string
+	TargetDisplayPath string
 }
 
 type BatchDeleteResult struct {

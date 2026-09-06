@@ -1,0 +1,24 @@
+services:
+  litepan:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: litepan:local
+    container_name: litepan
+    restart: unless-stopped
+    ports:
+      - "5211:5211"
+      - "42069:42069/tcp"
+      - "42069:42069/udp"
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - ./data:/app/data
+      - ./strm:/app/strm
+      - ./mounts:/app/mounts
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:5211/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 15s

@@ -2,7 +2,6 @@
 package drivers
 
 import (
-	// drivers/115 被 .gitignore 排除、不入库，空导入会让 clone 后编译失败。
 	_ "litepan/drivers/115_Open"
 	_ "litepan/drivers/123_Open"
 	_ "litepan/drivers/139Cloud"
