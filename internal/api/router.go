@@ -211,6 +211,7 @@ func NewRouter(d Deps) http.Handler {
 		r.Route("/public", func(r chi.Router) {
 			r.Use(h.requirePublicOrAdmin)
 			r.Get("/accounts", h.publicAccounts)
+			r.Get("/tools/pansou/search", h.searchPanSou)
 			r.Get("/system-config", h.publicSystemConfig)
 			r.Get("/cache/hit-rate", h.publicCacheHitRate)
 		})
@@ -330,6 +331,11 @@ func NewRouter(d Deps) http.Handler {
 					r.Post("/tasks/repair-account-references", h.repairStrmAccountReferences)
 					r.Post("/generate-current-directory", h.generateCurrentDirectoryStrm)
 					r.Post("/directory-status", h.checkStrmDirectoryStatus)
+				})
+				r.Route("/tools/pansou", func(r chi.Router) {
+					r.Get("/config", h.getPanSouConfig)
+					r.Put("/config", h.updatePanSouConfig)
+					r.Get("/search", h.searchPanSou)
 				})
 				r.Route("/tools/115-strm", func(r chi.Router) {
 					r.Get("/status", h.get115StrmToolStatus)
