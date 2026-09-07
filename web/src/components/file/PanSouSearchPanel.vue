@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { http, getApiErrorMessage } from "@/api/client";
 import AppButton from "@/components/base/AppButton.vue";
 import { copyTextToClipboard, toast } from "@/composables/useToast";
@@ -10,9 +10,27 @@ import {
   parsePanSouPayload,
   type PanSouItem,
 } from "@/utils/pansou";
+import type { Account } from "@/api/types";
+import type { OfflineDownloadCapabilities, OfflineDownloadTask } from "@/types/offline-download";
+import { loadPansouAccountCapabilities, pansouSaveCandidates } from "@/utils/pansouSave";
+import PanSouSaveModal from "./PanSouSaveModal.vue";
 
 /** “全部”标签页的特殊代号（平台代号不会与它冲突，因为平台代号不会为空字符串且已知代号为全小写）。 */
 const ALL_TAB = "__all__";
+
+const props = withDefaults(
+  defineProps<{
+    /** 账号列表：用于探测哪些账号支持把结果转存到自己的网盘（仅管理员）。 */
+    accounts?: Account[];
+    isAdmin?: boolean;
+  }>(),
+  { accounts: () => [], isAdmin: false },
+);
+
+const emit = defineEmits<{
+  /** 一键转存提交成功（供父页面登记任务、刷新目录）。 */
+  created: [tasks: OfflineDownloadTask[], target: { accountId: number; parentId: string; path: string }];
+}>();
 
 interface PlatformGroup {
   code: string;
@@ -139,6 +157,73 @@ const collapseHint = computed(() => {
   return results.value.length ? `展开（${results.value.length} 条结果）` : "展开";
 });
 
+// —— 一键转存：按账号离线能力探测可转存目标，并提交分享转存/离线下载任务 ——
+const capsByAccount = ref<Record<number, OfflineDownloadCapabilities>>({});
+const capsLoading = ref(false);
+let capsRequest = 0;
+
+const saveItem = ref<PanSouItem | null>(null);
+const saveOpen = ref(false);
+
+async function refreshCapabilities() {
+  if (!enabled.value || !props.isAdmin || !props.accounts.length) {
+    capsRequest += 1;
+    capsByAccount.value = {};
+    capsLoading.value = false;
+    return;
+  }
+  const seq = ++capsRequest;
+  capsLoading.value = true;
+  try {
+    const next = await loadPansouAccountCapabilities(props.accounts);
+    if (seq === capsRequest) capsByAccount.value = next;
+  } finally {
+    if (seq === capsRequest) capsLoading.value = false;
+  }
+}
+
+watch(
+  [
+    enabled,
+    () => props.isAdmin,
+    () => props.accounts.map((a) => a.id).join(","),
+  ],
+  () => {
+    void refreshCapabilities();
+  },
+  { immediate: true },
+);
+
+function candidatesFor(item: PanSouItem) {
+  return pansouSaveCandidates(item, props.accounts, capsByAccount.value);
+}
+
+function canSaveItem(item: PanSouItem) {
+  return props.isAdmin && candidatesFor(item).length > 0;
+}
+
+function saveButtonTitle(item: PanSouItem) {
+  if (!props.isAdmin) return "登录管理员后即可一键转存到自己的网盘";
+  if (capsLoading.value) return "正在探测可转存的网盘账号…";
+  if (!canSaveItem(item)) {
+    return "没有可接收该资源的网盘账号：需绑定对应平台的账号（夸克/115 支持分享转存），磁力、电驴链接可转到支持离线下载的账号";
+  }
+  return "一键转存到我的网盘，可选择目标目录";
+}
+
+function openSave(item: PanSouItem) {
+  if (!props.isAdmin || capsLoading.value || !canSaveItem(item)) return;
+  saveItem.value = item;
+  saveOpen.value = true;
+}
+
+function onSaveCreated(
+  tasks: OfflineDownloadTask[],
+  target: { accountId: number; parentId: string; path: string },
+) {
+  emit("created", tasks, target);
+}
+
 async function search() {
   const keyword = q.value.trim();
   if (!keyword || loading.value) return;
@@ -187,7 +272,7 @@ async function copyPassword(item: PanSouItem) {
     >
       <div class="pansou-panel__titles">
         <h2>资源搜索</h2>
-        <p>聚合已配置的网盘平台，搜索片名即可找到分享链接，复制后在离线下载 / 分享转存中提交。</p>
+        <p>聚合已配置的网盘平台，搜索片名即可找到分享链接，右侧「转存」可一键保存到你的网盘目录。</p>
       </div>
       <span class="pansou-panel__head-side">
         <span class="pansou-panel__badge">PanSou</span>
@@ -263,6 +348,16 @@ async function copyPassword(item: PanSouItem) {
           </div>
           <div class="pansou-result__actions">
             <button
+              type="button"
+              class="pansou-result__save"
+              :class="{ disabled: !canSaveItem(r) }"
+              :disabled="!canSaveItem(r)"
+              :title="saveButtonTitle(r)"
+              @click="openSave(r)"
+            >
+              转存
+            </button>
+            <button
               v-if="r.password"
               type="button"
               class="pansou-result__pwd"
@@ -315,10 +410,18 @@ async function copyPassword(item: PanSouItem) {
       没有搜到相关资源，换个关键词，或在「后台 → 增强工具 → 影视搜索转存」里调整搜索平台范围试试。
     </p>
     <p v-else-if="!loading && !errorMsg && !searched" class="pansou-hint">
-      输入片名开始搜索，复制分享链接后可在文件管理 / 离线下载中继续整理或转存。
+      输入片名开始搜索：找到的夸克 / 115 等资源可点击右侧「转存」一键保存到自己的网盘并选择目录，也可以复制链接在离线下载中手动提交。
     </p>
     </div>
   </section>
+
+  <PanSouSaveModal
+    :open="saveOpen"
+    :item="saveItem"
+    :candidates="saveItem ? candidatesFor(saveItem) : []"
+    @close="saveOpen = false"
+    @created="onSaveCreated"
+  />
 </template>
 
 <style scoped>
@@ -589,6 +692,27 @@ async function copyPassword(item: PanSouItem) {
   align-items: center;
   gap: 8px;
   justify-content: flex-end;
+}
+.pansou-result__save {
+  border: 0;
+  background: var(--brand-gradient-h);
+  color: var(--text-on-brand);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 6px 12px;
+  border-radius: 7px;
+  white-space: nowrap;
+  transition: opacity 0.15s ease, filter 0.15s ease;
+}
+.pansou-result__save:hover {
+  opacity: 0.9;
+  filter: brightness(1.04);
+}
+.pansou-result__save.disabled {
+  background: var(--border);
+  color: var(--text-muted);
+  cursor: not-allowed;
+  opacity: 1;
 }
 .pansou-result__pwd {
   border: 1px dashed var(--border);

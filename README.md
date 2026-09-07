@@ -71,7 +71,7 @@
 
 ## ▎ 挂载与更多功能
 
-支持 WebDAV 与 FUSE 本地挂载，另有 302 直链、缓存保持、命名对齐、HTTP/磁力离线下载、115/夸克分享链接转存，以及跨网盘平台的 PanSou 资源搜索等能力。
+支持 WebDAV 与 FUSE 本地挂载，另有 302 直链、缓存保持、命名对齐、HTTP/磁力离线下载、115/夸克分享链接转存，以及跨网盘平台的 PanSou 资源搜索与搜索结果一键转存等能力。
 
 ## ▎ 离线下载与分享转存
 
@@ -117,13 +117,15 @@ POST /api/files/offline-download/share
 
 `prepare` 只向前端返回短期 `preparation_id` 和可选择的文件列表。夸克 `stoken`、`share_fid_token` 与 115 分享参数保存在服务端内存中，绑定解析时使用的账号，并在 30 分钟后过期。转存任务记录只保存规范化分享 URL，不保存提取码或完整分享文案。
 
+除手动粘贴外，前台 PanSou 搜索结果与后台「影视搜索转存」测试列表均提供「转存」按钮：选择目录后，分享链接会整份转存，磁力 / 电驴链接则交给支持离线下载的账号执行。
+
 分享转存完成后会进入现有离线任务记录，并触发目录缓存失效、文件列表刷新和“离线下载完成”自动联动。空选择、过期 preparation、账号不匹配和重复提交都会返回校验错误。
 
 ---
 
 ## ▎ 资源搜索（PanSou）
 
-基于 PanSou 系列 API 的网盘资源聚合搜索：一次输入片名，即可跨多个已配置网盘平台检索分享链接，复制后在离线下载 / 分享转存中直接提交。
+基于 PanSou 系列 API 的网盘资源聚合搜索：一次输入片名，即可跨多个已配置网盘平台检索分享链接，找到后可在结果右侧一键转存到自己的网盘目录，也可复制到离线下载 / 分享转存中手动提交。
 
 ### 开启与配置
 
@@ -134,9 +136,14 @@ POST /api/files/offline-download/share
 
 ### 使用方式
 
-- 启用后，前台首页显示资源搜索入口；文件浏览器中也可随时打开 PanSou 搜索面板。
+- 启用后，前台首页显示资源搜索入口；文件浏览器中也可随时打开 PanSou 搜索面板（需要管理员身份登录）。
 - 输入片名搜索，结果按网盘平台展示分享链接与提取码。
-- 复制目标链接后，在对应网盘账号的「离线下载 → 分享转存」中提交，即可转存到自己的网盘。
+- **一键转存**：每条结果右侧都有「转存」按钮，点击后在弹窗中选择目标网盘账号与保存目录（可新建文件夹），确认后整份资源直接转存到自己的网盘：
+  - 分享链接（夸克 / 115 等）走对应网盘的分享转存接口，不经过本地下载与重新上传；
+  - 磁力、电驴等链接会自动切换到支持离线下载的账号执行；
+  - 站点没有可接收该资源的账号时按钮会置灰并说明原因（跨平台分享链接需要先绑定对应平台的网盘账号）。
+- 后台「增强工具 → 影视搜索转存」的连通性测试结果同样提供「转存」入口，可先行验证一键转存链路。
+- 复制目标链接后，也可在对应网盘账号的「离线下载 → 分享转存」中手动提交；两种方式共用同一套转存任务与进度追踪。
 
 > [!NOTE]
 > PanSou 为第三方聚合服务，可用性与返回内容取决于其上游服务。密码 / Token 属于敏感凭据，请仅保存在自己的 LitePan 实例中。
@@ -145,7 +152,7 @@ POST /api/files/offline-download/share
 
 ## ▎ 快速开始
 
-**Docker Compose 部署** · 镜像标签：`Beta`或指定`v0.5.4-Beta`
+**Docker Compose 部署** · 镜像标签：`Beta`或指定`v0.6.0`
 
 ```yaml
 services:
@@ -231,7 +238,7 @@ docker pull ghcr.io/q107580018/litepan:latest
 第三方依赖见 [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)。请遵守各网盘服务条款与当地法规。
 
 [docker-pulls-shield]: https://img.shields.io/docker/pulls/ponphil/litepan?logo=docker&logoColor=white&style=flat-square
-[version-shield]: https://img.shields.io/badge/Version-v0.5.4--Beta-6C63FF?style=flat-square
+[version-shield]: https://img.shields.io/badge/Version-v0.6.0-6C63FF?style=flat-square
 [license-shield]: https://img.shields.io/badge/License-PolyForm%20NC-red?style=flat-square
 [docker-url]: https://hub.docker.com/r/ponphil/litepan
 [license-url]: ./LICENSE
