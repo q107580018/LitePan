@@ -42,6 +42,7 @@ import ShareCreateModal from "./ShareCreateModal.vue";
 import ShareManageModal from "./ShareManageModal.vue";
 import { cloudShareApi } from "@/api/cloudShare";
 import type { CloudShareCapabilities } from "@/types/cloud-share";
+import PanSouSearchPanel from "./PanSouSearchPanel.vue";
 
 type FocusableInput = {
   focus: () => void;
@@ -1005,6 +1006,8 @@ homeFooterStatus.onOpenTaskPanel(openTaskPanel);
       :model-value="currentAccountId"
       @update:model-value="store.selectAccount"
     />
+
+    <PanSouSearchPanel />
 
     <div v-if="!compactHomeEnabled" class="browser__nav">
       <AccountSelector
