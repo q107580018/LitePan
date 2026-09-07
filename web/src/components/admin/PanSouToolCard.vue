@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
 import { http, getApiErrorMessage } from "@/api/client";
+import { accountsApi } from "@/api/accounts";
+import type { Account } from "@/api/types";
+import type { OfflineDownloadCapabilities } from "@/types/offline-download";
 import AppButton from "@/components/base/AppButton.vue";
 import AppModal from "@/components/base/AppModal.vue";
 import CloudToolCard from "@/components/admin/CloudToolCard.vue";
@@ -12,6 +15,8 @@ import {
   parsePanSouPayload,
   type PanSouItem,
 } from "@/utils/pansou";
+import { loadPansouAccountCapabilities, pansouSaveCandidates } from "@/utils/pansouSave";
+import PanSouSaveModal from "@/components/file/PanSouSaveModal.vue";
 
 const props = withDefaults(defineProps<{ searchQuery?: string }>(), { searchQuery: "" });
 
@@ -101,7 +106,10 @@ async function load() {
   }
 }
 
-onMounted(load);
+onMounted(() => {
+  void load();
+  void ensureSaveCapabilities();
+});
 
 async function toggleEnabled() {
   if (saving.value) return;
@@ -195,6 +203,52 @@ async function runTest() {
 async function copyItemUrl(item: PanSouItem) {
   const ok = await copyTextToClipboard(item.url);
   if (ok) toast.success("链接已复制");
+}
+
+// —— 一键转存：测试搜索结果同样可直接转存到已绑定账号 ——
+const accounts = ref<Account[]>([]);
+const capsByAccount = ref<Record<number, OfflineDownloadCapabilities>>({});
+const capsLoading = ref(false);
+const capsReady = ref(false);
+const saveOpen = ref(false);
+const saveItem = ref<PanSouItem | null>(null);
+
+async function ensureSaveCapabilities() {
+  if (capsReady.value) return;
+  capsLoading.value = true;
+  try {
+    if (!accounts.value.length) {
+      accounts.value = await accountsApi.list();
+    }
+    capsByAccount.value = await loadPansouAccountCapabilities(accounts.value);
+    capsReady.value = true;
+  } catch (e) {
+    toast.error(getApiErrorMessage(e, "探测账号转存能力失败"));
+  } finally {
+    capsLoading.value = false;
+  }
+}
+
+function saveCandidates(item: PanSouItem) {
+  return pansouSaveCandidates(item, accounts.value, capsByAccount.value);
+}
+
+function saveDisabled(item: PanSouItem) {
+  return capsLoading.value || saveCandidates(item).length === 0;
+}
+
+function saveTitle(item: PanSouItem) {
+  if (capsLoading.value) return "正在探测可转存的网盘账号…";
+  if (saveCandidates(item).length === 0) {
+    return "没有可接收该资源的网盘账号：需绑定对应平台的账号（夸克/115 支持分享转存），磁力、电驴链接可转到支持离线下载的账号";
+  }
+  return "一键转存到网盘，可选择目标目录";
+}
+
+function openSave(item: PanSouItem) {
+  if (!capsReady.value || capsLoading.value || saveCandidates(item).length === 0) return;
+  saveItem.value = item;
+  saveOpen.value = true;
 }
 </script>
 
@@ -312,7 +366,19 @@ async function copyItemUrl(item: PanSouItem) {
                 <strong :title="item.title">{{ item.title || "（未命名资源）" }}</strong>
                 <small :title="item.url">{{ item.url }}</small>
               </div>
-              <button type="button" @click="copyItemUrl(item)">复制</button>
+              <span class="ps-test__acts">
+                <button
+                  type="button"
+                  class="ps-test__save"
+                  :class="{ disabled: saveDisabled(item) }"
+                  :disabled="saveDisabled(item)"
+                  :title="saveTitle(item)"
+                  @click="openSave(item)"
+                >
+                  转存
+                </button>
+                <button type="button" @click="copyItemUrl(item)">复制</button>
+              </span>
             </div>
           </div>
         </div>
@@ -326,6 +392,13 @@ async function copyItemUrl(item: PanSouItem) {
         </AppButton>
       </template>
     </AppModal>
+
+    <PanSouSaveModal
+      :open="saveOpen"
+      :item="saveItem"
+      :candidates="saveItem ? saveCandidates(saveItem) : []"
+      @close="saveOpen = false"
+    />
   </div>
 </template>
 
@@ -522,6 +595,32 @@ async function copyItemUrl(item: PanSouItem) {
   color: var(--primary);
   font-size: 13px;
   cursor: pointer;
+}
+.ps-test__acts {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+.ps-test__acts button {
+  white-space: nowrap;
+}
+.ps-test__save {
+  background: var(--brand-gradient-h) !important;
+  color: var(--text-on-brand) !important;
+  border-radius: 7px;
+  padding: 5px 11px;
+  transition: opacity 0.15s ease;
+}
+.ps-test__save:hover {
+  opacity: 0.9;
+}
+.ps-test__save.disabled {
+  background: var(--border) !important;
+  color: var(--text-muted) !important;
+  cursor: not-allowed;
+}
+.ps-test__save.disabled:hover {
+  opacity: 1;
 }
 .ps-config__foot {
   margin-right: auto;

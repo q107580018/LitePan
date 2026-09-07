@@ -616,6 +616,22 @@ function handleOfflineTasksCreated(tasks: OfflineDownloadTask[]) {
   void uploadApi.openUploadTaskPanel("offline");
 }
 
+/** PanSou 一键转存任务：登记到离线任务面板，若恰好保存在当前浏览目录则立即刷新。 */
+function handlePansouSaveCreated(
+  tasks: OfflineDownloadTask[],
+  target: { accountId: number; parentId: string; path: string },
+) {
+  offline.registerTasks(tasks);
+  uploadApi.taskPanelCategory.value = "offline";
+  void uploadApi.openUploadTaskPanel("offline");
+  const sameAccount = target.accountId === currentAccountId.value;
+  const sameParent = String(target.parentId || "") === String(currentParentId.value || "");
+  const completed = tasks.some((task) => task.status === "success");
+  if (sameAccount && sameParent && completed) {
+    void store.loadFiles({ forceRefresh: true, silent: true });
+  }
+}
+
 const initialLocation = !hasPendingBrowserLocationReset() ? loadSavedBrowserLocation() : null;
 if (initialLocation) {
   store.primeLocation(initialLocation.accountId, initialLocation.crumbs);
@@ -968,7 +984,11 @@ homeFooterStatus.onOpenTaskPanel(openTaskPanel);
       @update:model-value="store.selectAccount"
     />
 
-    <PanSouSearchPanel />
+    <PanSouSearchPanel
+      :accounts="accounts"
+      :is-admin="isAdmin"
+      @created="handlePansouSaveCreated"
+    />
 
     <div v-if="!compactHomeEnabled" class="browser__nav">
       <AccountSelector
