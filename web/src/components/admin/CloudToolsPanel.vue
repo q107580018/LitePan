@@ -17,6 +17,7 @@ import CloudToolCard from "@/components/admin/CloudToolCard.vue";
 import LocalUploadToolCard from "@/components/admin/LocalUploadToolCard.vue";
 import ProxyToolsPanel from "@/components/admin/ProxyToolsPanel.vue";
 import QuarkTVToolCard from "@/components/admin/QuarkTVToolCard.vue";
+import PanSouToolCard from "@/components/admin/PanSouToolCard.vue";
 
 const props = withDefaults(defineProps<{ searchOpen?: boolean }>(), { searchOpen: false });
 const emit = defineEmits<{ "update:searchOpen": [boolean] }>();
@@ -25,7 +26,9 @@ const { runLoad } = useSettingsLoad();
 
 const searchQuery = ref("");
 const searchInputRef = ref<HTMLInputElement | null>(null);
-const cardTitles = ["Emby 反代", "飞牛影视反代", "115 STRM 增强", "夸克 STRM 接管", "AI 辅助识别", "目录整理分类", "从服务器上传", "垃圾清理工具", "视频海报生成"];
+const cardTitles = ["影视搜索转存", "Emby 反代", "飞牛影视反代", "115 STRM 增强", "夸克 STRM 接管", "AI 辅助识别", "目录整理分类", "从服务器上传", "垃圾清理工具", "视频海报生成"];
+const cardKeywords = ["影视搜索转存", "PanSou", "盘搜"];
+const allCardTitles = [...cardTitles, ...cardKeywords];
 
 function matches(title: string) {
   const q = searchQuery.value.trim().toLowerCase();
@@ -34,7 +37,7 @@ function matches(title: string) {
 
 const hasMatch = computed(() => {
   const q = searchQuery.value.trim().toLowerCase();
-  return !q || cardTitles.some((t) => t.toLowerCase().includes(q));
+  return !q || allCardTitles.some((t) => t.toLowerCase().includes(q));
 });
 
 function closeSearch() {
@@ -122,6 +125,7 @@ async function clearCache() {
     </div>
     <div class="cloud-tools__grid">
       <ProxyToolsPanel :search-query="searchQuery" />
+      <PanSouToolCard :search-query="searchQuery" />
       <CloudToolCard
         v-show="matches('115 STRM 增强')"
         :enabled="status.enabled"

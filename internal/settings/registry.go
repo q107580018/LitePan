@@ -51,6 +51,12 @@ const (
 	KeyStrmMetadataParentEnabled   = "strm_metadata_parent_enabled"
 	KeyStrmMetadataSyncMode        = "strm_metadata_sync_mode"
 	KeyStrmTool115TreeEnabled      = "strm_tool_115_tree_enabled"
+	KeyPanSouEnabled               = "pansou_enabled"
+	KeyPanSouEndpoint              = "pansou_endpoint"
+	KeyPanSouUsername              = "pansou_username"
+	KeyPanSouPassword              = "pansou_password"
+	KeyPanSouToken                 = "pansou_token"
+	KeyPanSouPlatforms             = "pansou_platforms"
 	KeyLocalUploadEnabled          = "local_upload_enabled"
 	KeyLocalUploadMappings         = "local_upload_mappings"
 	KeyCoverExtractEnabled         = "cover_extract_enabled"
@@ -196,6 +202,12 @@ func defaultSpecs() []Spec {
 		intSpec(KeyStrmMetadataMaxSizeMB, "strm", "元数据大小上限", "同步元数据时忽略超过该大小的文件。", "10", "MB", 1, 1024),
 		boolSpec(KeyStrmMetadataParentEnabled, "strm", "父目录元数据同步", "子目录有影片时，也同步父目录下的海报、nfo 等元数据。", "true"),
 		boolSpec(KeyStrmTool115TreeEnabled, "strm", "115 网盘 STRM 增强（目录树清单模式）", "开启后 115Open 账号的 STRM 任务改用全量清单 + 增量对账方式执行，减少逐目录递归请求；配了分支的任务维持原逻辑。", "false"),
+		boolSpec(KeyPanSouEnabled, "pansou", "启用 PanSou 资源搜索", "开启后前台首页显示资源搜索入口。搜索服务地址、鉴权资料和平台范围在辅助工具中统一管理。", "false"),
+		stringSpec(KeyPanSouEndpoint, "pansou", "PanSou 服务地址", "PanSou API 服务地址。", "https://so.252035.xyz"),
+		stringSpec(KeyPanSouUsername, "pansou", "Basic Auth 用户名", "可选的 Basic Auth 用户名。", ""),
+		{Key: KeyPanSouPassword, Type: TypeString, Category: "pansou", Label: "Basic Auth 密码", Description: "可选的 Basic Auth 密码。", Sensitive: true},
+		{Key: KeyPanSouToken, Type: TypeString, Category: "pansou", Label: "API Token", Description: "可选的 API Token。", Sensitive: true},
+		stringSpec(KeyPanSouPlatforms, "pansou", "搜索平台", "用逗号分隔平台标识，例如 115,quark,magnet。", "115,quark,magnet,baidu,aliyun,xunlei,tianyi,uc,pikpak"),
 		selectSpec(KeyStrmMetadataSyncMode, "strm", "元数据同步策略", "local_primary=保留本地并从云端补缺；cloud_primary=本地目录与云端保持一致；bidirectional=本地与云端互相补缺。", "local_primary", []Option{
 			{Value: "cloud_primary", Label: "网盘元数据为主"},
 			{Value: "local_primary", Label: "本地元数据补缺"},
@@ -343,6 +355,7 @@ func categories() []Category {
 		{ID: "account_display", Label: "网盘账号显示"},
 		{ID: "performance", Label: "性能设置"},
 		{ID: "strm", Label: "STRM 设置"},
+		{ID: "pansou", Label: "PanSou 资源搜索"},
 		{ID: "media_organize", Label: "媒体整理设置"},
 	}
 }

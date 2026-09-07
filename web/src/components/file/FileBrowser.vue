@@ -38,6 +38,7 @@ import AppModal from "@/components/base/AppModal.vue";
 import AppInput from "@/components/base/AppInput.vue";
 import TaskPanel from "@/components/upload/TaskPanel.vue";
 import OfflineDownloadModal from "./OfflineDownloadModal.vue";
+import PanSouSearchPanel from "./PanSouSearchPanel.vue";
 
 type FocusableInput = {
   focus: () => void;
@@ -966,6 +967,8 @@ homeFooterStatus.onOpenTaskPanel(openTaskPanel);
       :model-value="currentAccountId"
       @update:model-value="store.selectAccount"
     />
+
+    <PanSouSearchPanel />
 
     <div v-if="!compactHomeEnabled" class="browser__nav">
       <AccountSelector

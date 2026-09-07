@@ -3,6 +3,8 @@ package api
 import (
 	"math"
 	"net/http"
+
+	"litepan/internal/settings"
 )
 
 func (h *Handler) publicAccounts(w http.ResponseWriter, r *http.Request) {
@@ -36,5 +38,6 @@ func (h *Handler) publicSystemConfig(w http.ResponseWriter, r *http.Request) {
 		"compact_home_enabled":           h.adminAuth.CompactHomeEnabled(r.Context()),
 		"header_effects_enabled":         h.adminAuth.HeaderEffectsEnabled(r.Context()),
 		"index_strm_auto_detect_enabled": h.adminAuth.IndexStrmAutoDetectEnabled(r.Context()),
+		"pansou_enabled":                 h.settings != nil && h.settings.Bool(settings.KeyPanSouEnabled),
 	})
 }
