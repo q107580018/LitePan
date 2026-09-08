@@ -6,16 +6,24 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"litepan/internal/settings"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 )
 
-// panSouClient 带明确超时，避免 PanSou 上游挂起时请求无限等待、前端一直处于加载态。
-var panSouClient = &http.Client{Timeout: 10 * time.Second}
+// panSouClient 给 PanSou 冷搜索留出足够时间。PanSou 首次聚合多个来源时通常需要 20 秒以上，
+// 过短的超时会让首次搜索必然失败；热缓存仍会在毫秒级返回。
+const panSouRequestTimeout = 35 * time.Second
+
+var panSouClient = &http.Client{Timeout: panSouRequestTimeout}
 
 // panSouCloudTypes 是 PanSou 服务认可的网盘类型标识（cloud_types 参数），
 // 顺序即展示顺序。仅这些值会被透传/展示，避免历史配置里的无效代号把结果搜空。
@@ -136,6 +144,7 @@ func (h *Handler) searchPanSou(w http.ResponseWriter, r *http.Request) {
 		qs.Set("cloud_types", strings.Join(platforms, ","))
 	}
 	u.RawQuery = qs.Encode()
+	startedAt := time.Now()
 	requestLogger(r.Context()).Info("PanSou 搜索请求", "kw", q, "endpoint", base, "cloud_types", platforms)
 	req, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, u.String(), nil)
 	user, pass := "", ""
@@ -167,7 +176,8 @@ func (h *Handler) searchPanSou(w http.ResponseWriter, r *http.Request) {
 		lastStatus int
 		lastErr    error
 	)
-	for attempt := 0; attempt < 3; attempt++ {
+	const maxAttempts = 2
+	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
 			select {
 			case <-time.After(time.Duration(attempt) * 600 * time.Millisecond):
@@ -210,22 +220,105 @@ func (h *Handler) searchPanSou(w http.ResponseWriter, r *http.Request) {
 		writeOK(w, payload)
 		return
 	}
-	if lastErr != nil && lastStatus == 0 {
-		writeErr(w, lastErr)
-		return
+	finalErr := lastErr
+	if finalErr == nil || lastStatus >= 400 {
+		finalErr = fmt.Errorf("PanSou 服务暂不可用（HTTP %d），请稍后重试", lastStatus)
 	}
-	if lastStatus >= 400 {
-		writeErr(w, fmt.Errorf("PanSou 服务暂不可用（HTTP %d），请稍后重试", lastStatus))
-		return
-	}
-	if lastErr != nil {
-		writeErr(w, lastErr)
-		return
-	}
-	writeErr(w, fmt.Errorf("PanSou 服务暂不可用（HTTP %d），请稍后重试", lastStatus))
+	requestLogger(r.Context()).Warn("PanSou 搜索失败",
+		"kw", q,
+		"attempts", maxAttempts,
+		"elapsed_ms", time.Since(startedAt).Milliseconds(),
+		"last_status", lastStatus,
+		"err", finalErr.Error(),
+	)
+	writeErr(w, finalErr)
 }
 
-// get115StrmToolStatus 返回 115 STRM 增强（目录树清单模式）卡片状态。
+// panSouJob 是短生命周期的内存任务；结果不持久化，重启后任务自然消失。
+type panSouJob struct {
+	mu      sync.RWMutex
+	status  string // pending, running, succeeded, failed
+	payload json.RawMessage
+	err     string
+}
+
+func (h *Handler) startPanSouJob(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Q         string `json:"q"`
+		Endpoint  string `json:"endpoint"`
+		Username  string `json:"username"`
+		Password  string `json:"password"`
+		Token     string `json:"token"`
+		Platforms string `json:"platforms"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		writeErr(w, err)
+		return
+	}
+	if strings.TrimSpace(in.Q) == "" {
+		writeErr(w, fmt.Errorf("搜索关键词不能为空"))
+		return
+	}
+	values := url.Values{"q": {strings.TrimSpace(in.Q)}}
+	if strings.HasPrefix(r.URL.Path, "/api/admin/") {
+		for key, value := range map[string]string{"endpoint": in.Endpoint, "username": in.Username, "password": in.Password, "token": in.Token, "platforms": in.Platforms} {
+			if strings.TrimSpace(value) != "" {
+				values.Set(key, value)
+			}
+		}
+	}
+	id := uuid.NewString()
+	job := &panSouJob{status: "pending"}
+	h.panSouJobsMu.Lock()
+	h.panSouJobs[id] = job
+	h.panSouJobsMu.Unlock()
+	go func() {
+		job.mu.Lock()
+		job.status = "running"
+		job.mu.Unlock()
+		req := httptest.NewRequest(http.MethodGet, r.URL.Path+"?"+values.Encode(), nil)
+		rec := httptest.NewRecorder()
+		h.searchPanSou(rec, req)
+		var out struct {
+			Success bool            `json:"success"`
+			Data    json.RawMessage `json:"data"`
+			Message string          `json:"message"`
+		}
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		job.mu.Lock()
+		defer job.mu.Unlock()
+		if out.Success {
+			job.status = "succeeded"
+			job.payload = append(json.RawMessage(nil), out.Data...)
+		} else {
+			job.status = "failed"
+			job.err = out.Message
+		}
+	}()
+	writeOK(w, map[string]string{"job_id": id})
+}
+
+func (h *Handler) getPanSouJob(w http.ResponseWriter, r *http.Request) {
+	h.panSouJobsMu.Lock()
+	job := h.panSouJobs[chi.URLParam(r, "job_id")]
+	h.panSouJobsMu.Unlock()
+	if job == nil {
+		writeErr(w, fmt.Errorf("搜索任务不存在或已过期"))
+		return
+	}
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+	out := map[string]any{"status": job.status}
+	if job.status == "succeeded" {
+		out["payload"] = job.payload
+	}
+	if job.status == "failed" {
+		out["error"] = job.err
+	}
+	writeOK(w, out)
+}
+
+// get115StrmToolStatus 返回 115 STRM 增强（目录树清单模式）。
 func (h *Handler) get115StrmToolStatus(w http.ResponseWriter, r *http.Request) {
 	if h.strm == nil {
 		writeOK(w, map[string]any{"enabled": false, "cache_count": 0, "available": false})

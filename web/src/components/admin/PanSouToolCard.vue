@@ -17,6 +17,7 @@ import {
 } from "@/utils/pansou";
 import { loadPansouAccountCapabilities, pansouSaveCandidates } from "@/utils/pansouSave";
 import PanSouSaveModal from "@/components/file/PanSouSaveModal.vue";
+import { asyncAdminPanSouSearch } from "@/utils/pansouAsync";
 
 const props = withDefaults(defineProps<{ searchQuery?: string }>(), { searchQuery: "" });
 
@@ -188,7 +189,7 @@ async function runTest() {
   testCount.value = null;
   testItems.value = [];
   try {
-    const payload: any = await http.get("/admin/tools/pansou/search", testQuery());
+    const payload: any = await asyncAdminPanSouSearch(testQuery());
     const items = parsePanSouPayload(payload);
     testCount.value = items.length;
     testItems.value = items.slice(0, 5);
