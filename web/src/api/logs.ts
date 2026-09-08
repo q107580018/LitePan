@@ -44,6 +44,7 @@ export interface LogQuery {
 
 export const LOG_LEVELS = [
   { value: "", label: "所有级别" },
+  { value: 10, label: "🔍 DEBUG" },
   { value: 20, label: "ℹ️ INFO" },
   { value: 30, label: "⚠️ WARNING" },
   { value: 40, label: "❌ ERROR" },

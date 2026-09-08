@@ -152,12 +152,12 @@ POST /api/files/offline-download/share
 
 ## ▎ 快速开始
 
-**Docker Compose 部署** · 镜像标签：`Beta`或指定`v0.6.0`
+**Docker Compose 部署** · 镜像标签：`latest` 或指定 `v0.6.1`
 
 ```yaml
 services:
   litepan:
-    image: ponphil/litepan:beta
+    image: ghcr.io/q107580018/litepan:latest
     container_name: litepan
     restart: unless-stopped
     ports:
@@ -200,7 +200,7 @@ services:
 docker pull ghcr.io/q107580018/litepan:latest
 ```
 
-将上方 Compose 中的 `image: ponphil/litepan:beta` 换成 `ghcr.io/q107580018/litepan:latest` 即可使用本仓库对应代码的镜像（新功能以本仓库为准，如 115 / 夸克分享转存、PanSou 资源搜索）。
+如需固定当前版本，可将 Compose 中的镜像改为 `ghcr.io/q107580018/litepan:v0.6.1`。
 
 手动触发构建：在仓库 **Actions → docker-publish → Run workflow**。
 
@@ -238,7 +238,7 @@ docker pull ghcr.io/q107580018/litepan:latest
 第三方依赖见 [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)。请遵守各网盘服务条款与当地法规。
 
 [docker-pulls-shield]: https://img.shields.io/docker/pulls/ponphil/litepan?logo=docker&logoColor=white&style=flat-square
-[version-shield]: https://img.shields.io/badge/Version-v0.6.0-6C63FF?style=flat-square
+[version-shield]: https://img.shields.io/badge/Version-v0.6.1-6C63FF?style=flat-square
 [license-shield]: https://img.shields.io/badge/License-PolyForm%20NC-red?style=flat-square
 [docker-url]: https://hub.docker.com/r/ponphil/litepan
 [license-url]: ./LICENSE

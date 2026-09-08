@@ -9,7 +9,8 @@ on:
 env:
   REGISTRY: ghcr.io
   # GHCR 要求镜像名全小写
-  IMAGE_NAME: ${{ github.repository_owner }}/litepan
+  IMAGE_NAME: q107580018/litepan
+  RELEASE_VERSION: v0.6.1
 
 concurrency:
   group: docker-publish-${{ github.ref }}
@@ -45,6 +46,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ env.RELEASE_VERSION }},enable={{is_default_branch}}
             type=sha,prefix=sha-,format=short
             type=ref,event=tag
             type=semver,pattern={{version}}
