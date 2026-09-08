@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { http, getApiErrorMessage } from "@/api/client";
 import AppButton from "@/components/base/AppButton.vue";
 import { copyTextToClipboard, toast } from "@/composables/useToast";
@@ -14,6 +14,7 @@ import type { Account } from "@/api/types";
 import type { OfflineDownloadCapabilities, OfflineDownloadTask } from "@/types/offline-download";
 import { loadPansouAccountCapabilities, pansouSaveCandidates } from "@/utils/pansouSave";
 import PanSouSaveModal from "./PanSouSaveModal.vue";
+import { asyncPanSouSearch } from "@/utils/pansouAsync";
 
 /** “全部”标签页的特殊代号（平台代号不会与它冲突，因为平台代号不会为空字符串且已知代号为全小写）。 */
 const ALL_TAB = "__all__";
@@ -41,6 +42,7 @@ interface PlatformGroup {
 const enabled = ref(false);
 const q = ref("");
 const loading = ref(false);
+const searchTakingLong = ref(false);
 const searched = ref(false);
 const results = ref<PanSouItem[]>([]);
 const total = ref<number | null>(null);
@@ -224,10 +226,26 @@ function onSaveCreated(
   emit("created", tasks, target);
 }
 
+let slowSearchTimer: ReturnType<typeof setTimeout> | undefined;
+
+function clearSlowSearchTimer() {
+  if (slowSearchTimer !== undefined) {
+    clearTimeout(slowSearchTimer);
+    slowSearchTimer = undefined;
+  }
+}
+
+onBeforeUnmount(clearSlowSearchTimer);
+
 async function search() {
   const keyword = q.value.trim();
   if (!keyword || loading.value) return;
+  clearSlowSearchTimer();
+  searchTakingLong.value = false;
   loading.value = true;
+  slowSearchTimer = setTimeout(() => {
+    if (loading.value) searchTakingLong.value = true;
+  }, 8000);
   searched.value = true;
   errorMsg.value = "";
   results.value = [];
@@ -235,13 +253,15 @@ async function search() {
   activeTab.value = ALL_TAB;
   currentPage.value = 1;
   try {
-    const payload: any = await http.get("/public/tools/pansou/search", { q: keyword });
+    const payload: any = await asyncPanSouSearch({ q: keyword });
     total.value = panSouTotal(payload);
     results.value = parsePanSouPayload(payload);
   } catch (e) {
     errorMsg.value = getApiErrorMessage(e, "资源搜索失败，请稍后重试");
     toast.error(errorMsg.value);
   } finally {
+    clearSlowSearchTimer();
+    searchTakingLong.value = false;
     loading.value = false;
   }
 }
@@ -305,6 +325,9 @@ async function copyPassword(item: PanSouItem) {
     </div>
 
     <p v-if="errorMsg" class="pansou-error">{{ errorMsg }}</p>
+    <p v-else-if="loading && searchTakingLong" class="pansou-hint pansou-hint--loading">
+      搜索仍在进行中，上游资源聚合可能需要一点时间，请耐心等待…
+    </p>
 
     <template v-if="results.length">
       <div class="pansou-meta">
@@ -743,6 +766,9 @@ async function copyPassword(item: PanSouItem) {
   margin: 16px 0 0;
   color: var(--text-muted);
   font-size: 13px;
+}
+.pansou-hint--loading {
+  color: var(--primary);
 }
 @media (max-width: 700px) {
   .pansou-result {

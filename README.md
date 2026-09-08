@@ -152,7 +152,11 @@ POST /api/files/offline-download/share
 
 ## ▎ 快速开始
 
+<<<<<<< HEAD
 **Docker Compose 部署** · 镜像标签：`Beta`或指定`v0.5.7-Beta`
+=======
+**Docker Compose 部署** · 镜像标签：`latest` 或指定 `v0.6.2`
+>>>>>>> d2c19ac2 (feat: optimize PanSou search and release v0.6.2)
 
 ```yaml
 services:
@@ -200,7 +204,7 @@ services:
 docker pull ghcr.io/q107580018/litepan:latest
 ```
 
-如需固定当前版本，可将 Compose 中的镜像改为 `ghcr.io/q107580018/litepan:v0.6.1`。
+如需固定当前版本，可将 Compose 中的镜像改为 `ghcr.io/q107580018/litepan:v0.6.2`。
 
 手动触发构建：在仓库 **Actions → docker-publish → Run workflow**。
 
@@ -238,7 +242,11 @@ docker pull ghcr.io/q107580018/litepan:latest
 第三方依赖见 [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)。请遵守各网盘服务条款与当地法规。
 
 [docker-pulls-shield]: https://img.shields.io/docker/pulls/ponphil/litepan?logo=docker&logoColor=white&style=flat-square
+<<<<<<< HEAD
 [version-shield]: https://img.shields.io/badge/Version-v0.5.7--Beta-6C63FF?style=flat-square
+=======
+[version-shield]: https://img.shields.io/badge/Version-v0.6.2-6C63FF?style=flat-square
+>>>>>>> d2c19ac2 (feat: optimize PanSou search and release v0.6.2)
 [license-shield]: https://img.shields.io/badge/License-PolyForm%20NC-red?style=flat-square
 [docker-url]: https://hub.docker.com/r/ponphil/litepan
 [license-url]: ./LICENSE
