@@ -137,6 +137,9 @@ type Handler struct {
 
 	devMu       sync.Mutex
 	devUnlocked bool
+
+	panSouJobsMu sync.Mutex
+	panSouJobs   map[string]*panSouJob
 }
 
 // NewRouter 装配并返回 HTTP 路由（含内嵌管理页面）。
@@ -183,6 +186,7 @@ func NewRouter(d Deps) http.Handler {
 		dataDir:           d.DataDir,
 		strmDir:           d.StrmDir,
 		onSettingsUpdated: d.OnSettingsUpdated,
+		panSouJobs:        make(map[string]*panSouJob),
 	}
 
 	r := chi.NewRouter()
@@ -207,6 +211,8 @@ func NewRouter(d Deps) http.Handler {
 			r.Use(h.requirePublicOrAdmin)
 			r.Get("/accounts", h.publicAccounts)
 			r.Get("/tools/pansou/search", h.searchPanSou)
+			r.Post("/tools/pansou/search/jobs", h.startPanSouJob)
+			r.Get("/tools/pansou/search/jobs/{job_id}", h.getPanSouJob)
 			r.Get("/system-config", h.publicSystemConfig)
 			r.Get("/cache/hit-rate", h.publicCacheHitRate)
 		})
@@ -325,6 +331,8 @@ func NewRouter(d Deps) http.Handler {
 					r.Get("/config", h.getPanSouConfig)
 					r.Put("/config", h.updatePanSouConfig)
 					r.Get("/search", h.searchPanSou)
+					r.Post("/search/jobs", h.startPanSouJob)
+					r.Get("/search/jobs/{job_id}", h.getPanSouJob)
 				})
 				r.Route("/tools/115-strm", func(r chi.Router) {
 					r.Get("/status", h.get115StrmToolStatus)
