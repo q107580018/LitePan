@@ -1,6 +1,6 @@
 services:
   litepan:
-    image: ponphil/litepan:beta
+    image: ghcr.io/q107580018/litepan:latest
     container_name: litepan
     restart: unless-stopped
     ports:
