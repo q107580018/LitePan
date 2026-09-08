@@ -31,7 +31,7 @@ func (h *Handler) listLogs(w http.ResponseWriter, r *http.Request) {
 		writeOK(w, []logEntryDTO{})
 		return
 	}
-	minLevel := logx.LevelInfo
+	minLevel := logx.LevelDebug
 	q := logx.QueryFilter{
 		MinLevel:  &minLevel,
 		Module:    r.URL.Query().Get("module"),
@@ -75,7 +75,7 @@ func (h *Handler) logStats(w http.ResponseWriter, r *http.Request) {
 	if h.settings != nil {
 		ackAt = strings.TrimSpace(h.settings.String(settings.KeyLogErrorAckAt))
 	}
-	writeOK(w, h.logs.Storage().StatsFiltered(logx.LevelInfo, ackAt))
+	writeOK(w, h.logs.Storage().StatsFiltered(logx.LevelDebug, ackAt))
 }
 
 func (h *Handler) ackRecentErrors(w http.ResponseWriter, r *http.Request) {
@@ -83,6 +83,7 @@ func (h *Handler) ackRecentErrors(w http.ResponseWriter, r *http.Request) {
 		writeOK(w, logx.Stats{ByLevel: map[string]int{}, ByModule: map[string]int{}})
 		return
 	}
+	// StatsRecent 只读最近两天文件，避免全量扫描拖慢接口（上游优化）。
 	latest := strings.TrimSpace(h.logs.Storage().StatsRecent(logx.LevelInfo, "").LastRecentErrorAt)
 	if latest == "" {
 		latest = time.Now().Format(time.RFC3339)
@@ -94,7 +95,7 @@ func (h *Handler) ackRecentErrors(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.logs.Storage().InvalidateStatsCache()
-	writeOK(w, h.logs.Storage().StatsFiltered(logx.LevelInfo, latest))
+	writeOK(w, h.logs.Storage().StatsFiltered(logx.LevelDebug, latest))
 }
 
 func (h *Handler) cleanupLogs(w http.ResponseWriter, r *http.Request) {
