@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM node:22-bookworm-slim AS web
+FROM --platform=$BUILDPLATFORM node:22-bookworm-slim AS web
 
 WORKDIR /src/web
 
@@ -12,7 +12,7 @@ COPY web/ ./
 RUN npm run build
 
 
-FROM golang:1.26.6-bookworm AS build
+FROM --platform=$BUILDPLATFORM golang:1.26.6-bookworm AS build
 
 WORKDIR /src
 
@@ -21,6 +21,8 @@ ENV GOTOOLCHAIN=local \
     CGO_ENABLED=0 \
     GOPROXY=https://goproxy.cn,direct
 ARG BUILD_TAGS=fuse
+ARG TARGETOS
+ARG TARGETARCH
 
 COPY go.mod go.sum ./
 RUN go mod download
@@ -28,7 +30,8 @@ RUN go mod download
 COPY . .
 COPY --from=web /src/internal/api/web /src/internal/api/web
 
-RUN go build -tags "${BUILD_TAGS}" -trimpath -ldflags="-s -w" -o /out/litepan ./cmd/litepan
+RUN GOOS="${TARGETOS}" GOARCH="${TARGETARCH}" \
+    go build -tags "${BUILD_TAGS}" -trimpath -ldflags="-s -w" -o /out/litepan ./cmd/litepan
 
 
 FROM debian:bookworm-slim AS runtime
