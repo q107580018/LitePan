@@ -59,6 +59,7 @@ type modelProtocol uint8
 const (
 	protocolOpenAI modelProtocol = iota + 1
 	protocolAnthropic
+	protocolOpenAIResponses
 )
 
 type anthropicRequest struct {
@@ -75,6 +76,35 @@ type anthropicResponse struct {
 	} `json:"content"`
 }
 
+type responsesInputMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type responsesRequest struct {
+	Model        string                  `json:"model"`
+	Instructions string                  `json:"instructions,omitempty"`
+	Input        []responsesInputMessage `json:"input"`
+}
+
+type responsesResponse struct {
+	Status string `json:"status"`
+	Error  *struct {
+		Message string `json:"message"`
+	} `json:"error"`
+	IncompleteDetails *struct {
+		Reason string `json:"reason"`
+	} `json:"incomplete_details"`
+	OutputText string `json:"output_text"`
+	Output     []struct {
+		Type    string `json:"type"`
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	} `json:"output"`
+}
+
 func (s *Service) chat(ctx context.Context, cfg Config, messages []chatMessage) (string, error) {
 	protocols := s.protocolCandidates(cfg)
 	var lastErr error
@@ -85,7 +115,7 @@ func (s *Service) chat(ctx context.Context, cfg Config, messages []chatMessage) 
 			return content, nil
 		}
 		lastErr = err
-		if index == len(protocols)-1 || !isProtocolMismatch(status, body) {
+		if stopModelRetry(ctx, err) || index == len(protocols)-1 || !isProtocolMismatch(status, body) {
 			return "", err
 		}
 	}
@@ -98,14 +128,34 @@ func (s *Service) protocolCandidates(cfg Config) []modelProtocol {
 	remembered := s.protocols[key]
 	s.mu.Unlock()
 	if remembered != 0 {
-		return []modelProtocol{remembered, otherProtocol(remembered)}
+		return protocolCandidatesAfter(remembered)
 	}
 	preferred := protocolOpenAI
 	hint := strings.ToLower(cfg.BaseURL + " " + cfg.Model)
-	if strings.Contains(hint, "anthropic") || strings.Contains(hint, "claude") || strings.Contains(hint, "/messages") {
+	switch {
+	case strings.Contains(hint, "/responses") || strings.Contains(hint, "openai-responses"):
+		preferred = protocolOpenAIResponses
+	case strings.Contains(hint, "anthropic") || strings.Contains(hint, "claude") || strings.Contains(hint, "/messages"):
 		preferred = protocolAnthropic
 	}
-	return []modelProtocol{preferred, otherProtocol(preferred)}
+	return protocolCandidatesAfter(preferred)
+}
+
+func protocolCandidatesAfter(preferred modelProtocol) []modelProtocol {
+	all := []modelProtocol{protocolOpenAI, protocolAnthropic, protocolOpenAIResponses}
+	out := make([]modelProtocol, 0, len(all))
+	for _, protocol := range all {
+		if protocol == preferred {
+			out = append(out, protocol)
+			break
+		}
+	}
+	for _, protocol := range all {
+		if protocol != preferred {
+			out = append(out, protocol)
+		}
+	}
+	return out
 }
 
 func (s *Service) rememberProtocol(cfg Config, protocol modelProtocol) {
@@ -118,27 +168,24 @@ func protocolCacheKey(cfg Config) string {
 	return strings.ToLower(strings.TrimSpace(cfg.BaseURL)) + "\x00" + strings.ToLower(strings.TrimSpace(cfg.Model))
 }
 
-func otherProtocol(protocol modelProtocol) modelProtocol {
-	if protocol == protocolAnthropic {
-		return protocolOpenAI
-	}
-	return protocolAnthropic
-}
-
 func (s *Service) chatWithProtocol(
 	ctx context.Context,
 	cfg Config,
 	messages []chatMessage,
 	protocol modelProtocol,
 ) (string, int, []byte, error) {
-	if protocol == protocolAnthropic {
+	switch protocol {
+	case protocolAnthropic:
 		return s.doAnthropicChat(ctx, cfg, messages)
+	case protocolOpenAIResponses:
+		return s.doOpenAIResponsesChat(ctx, cfg, messages)
+	default:
+		content, status, body, err := s.doOpenAIChat(ctx, cfg, messages, true)
+		if !stopModelRetry(ctx, err) && status == http.StatusBadRequest && strings.Contains(strings.ToLower(string(body)), "response_format") {
+			return s.doOpenAIChat(ctx, cfg, messages, false)
+		}
+		return content, status, body, err
 	}
-	content, status, body, err := s.doOpenAIChat(ctx, cfg, messages, true)
-	if status == http.StatusBadRequest && strings.Contains(strings.ToLower(string(body)), "response_format") {
-		return s.doOpenAIChat(ctx, cfg, messages, false)
-	}
-	return content, status, body, err
 }
 
 func (s *Service) doOpenAIChat(
@@ -176,6 +223,81 @@ func (s *Service) doOpenAIChat(
 	return content, status, data, nil
 }
 
+func (s *Service) doOpenAIResponsesChat(
+	ctx context.Context,
+	cfg Config,
+	messages []chatMessage,
+) (string, int, []byte, error) {
+	endpoint, err := openAIResponsesEndpoint(cfg.BaseURL)
+	if err != nil {
+		return "", 0, nil, err
+	}
+	instructions, input := splitResponsesMessages(messages)
+	payload := responsesRequest{Model: cfg.Model, Instructions: instructions, Input: input}
+	// Responses API 的兼容网关对 text.format=json_object 的支持并不一致；
+	// 提示词已经要求严格 JSON，因此不发送该可选字段，兼容性更好。
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", 0, nil, err
+	}
+	status, data, err := s.executeModelRequest(ctx, endpoint, body, map[string]string{
+		"Authorization": "Bearer " + cfg.APIKey,
+	})
+	if err != nil {
+		return "", status, data, err
+	}
+	secrets := diagnosticSecrets(endpoint, map[string]string{"Authorization": "Bearer " + cfg.APIKey})
+	var decoded responsesResponse
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return "", status, nil, domain.Errorf(domain.CodeDriverError, "Responses 服务返回的 JSON 无法解析（endpoint=%s）", safeDiagnostic(endpoint, endpoint, secrets, 512))
+	}
+	if decoded.Error != nil || (decoded.Status != "" && decoded.Status != "completed") {
+		detail := "status=" + decoded.Status
+		if decoded.Error != nil {
+			detail += ": " + decoded.Error.Message
+		}
+		if decoded.IncompleteDetails != nil {
+			detail += ": " + decoded.IncompleteDetails.Reason
+		}
+		return "", status, nil, domain.Errorf(domain.CodeDriverError, "Responses 请求未完成：%s", safeDiagnostic(detail, endpoint, secrets, 512))
+	}
+	for _, item := range decoded.Output {
+		for _, block := range item.Content {
+			if block.Type == "refusal" {
+				return "", status, nil, domain.Errorf(domain.CodeDriverError, "Responses 模型拒绝了识别请求")
+			}
+		}
+	}
+	content := strings.TrimSpace(decoded.OutputText)
+	if content == "" {
+		parts := make([]string, 0)
+		for _, item := range decoded.Output {
+			for _, block := range item.Content {
+				if (block.Type == "output_text" || block.Type == "text") && strings.TrimSpace(block.Text) != "" {
+					parts = append(parts, strings.TrimSpace(block.Text))
+				}
+			}
+		}
+		content = strings.TrimSpace(strings.Join(parts, "\n"))
+	}
+	if content == "" {
+		return "", status, data, domain.Errorf(domain.CodeDriverError, "模型没有返回识别结果")
+	}
+	return content, status, data, nil
+}
+
+func splitResponsesMessages(messages []chatMessage) (string, []responsesInputMessage) {
+	instructions := make([]string, 0, 1)
+	input := make([]responsesInputMessage, 0, len(messages))
+	for _, message := range messages {
+		if message.Role == "system" {
+			instructions = append(instructions, message.Content)
+			continue
+		}
+		input = append(input, responsesInputMessage{Role: message.Role, Content: message.Content})
+	}
+	return strings.Join(instructions, "\n\n"), input
+}
 func (s *Service) doAnthropicChat(
 	ctx context.Context,
 	cfg Config,
@@ -238,32 +360,57 @@ func (s *Service) executeModelRequest(
 	body []byte,
 	headers map[string]string,
 ) (int, []byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return 0, nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	for key, value := range headers {
-		req.Header.Set(key, value)
-	}
-	resp, data, err := httpx.Execute(s.http, req, 4<<20)
-	if err != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return 0, nil, &domain.AppError{Code: domain.CodeDriverError, Message: "AI 识别已取消", Err: ctxErr}
+	// 最多尝试 3 次：网络错误仅重试一次；HTTP 408/429/5xx 可重试两次（网关常见瞬时 503）。
+	const maxAttempts = 3
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+		if err != nil {
+			return 0, nil, modelRequestError(ctx, endpoint, headers, nil, err)
 		}
-		var netErr net.Error
-		if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) {
-			return 0, nil, modelTimeoutError(err)
+		req.Header.Set("Content-Type", "application/json")
+		for key, value := range headers {
+			req.Header.Set(key, value)
 		}
-		return 0, nil, &domain.AppError{Code: domain.CodeDriverError, Message: "连接模型服务失败", Err: err}
+		started := time.Now()
+		resp, data, err := httpx.Execute(s.http, req, 4<<20)
+		status := 0
+		if resp != nil {
+			status = resp.StatusCode
+		}
+		if err != nil {
+			diagnostic := modelRequestError(ctx, endpoint, headers, resp, err)
+			s.logModelAttempt(ctx, endpoint, body, headers, resp, attempt, started, diagnostic)
+			if ctx.Err() != nil {
+				return status, nil, modelRequestError(ctx, endpoint, headers, resp, ctx.Err())
+			}
+			if attempt == 0 && !stopModelRetry(ctx, err) && waitContext(ctx, 350*time.Millisecond) {
+				continue
+			}
+			return status, nil, diagnostic
+		}
+		var httpErr error
+		if status < 200 || status >= 300 {
+			httpErr = modelHTTPDiagnostic(status, data, resp, endpoint, headers)
+		}
+		s.logModelAttempt(ctx, endpoint, body, headers, resp, attempt, started, httpErr)
+		if status == http.StatusTooManyRequests || status == http.StatusRequestTimeout || status >= 500 {
+			if attempt+1 < maxAttempts && waitContext(ctx, time.Duration(attempt+1)*500*time.Millisecond) {
+				continue
+			}
+			if ctx.Err() != nil {
+				return status, nil, modelRequestError(ctx, endpoint, headers, resp, ctx.Err())
+			}
+		}
+		if status == http.StatusRequestTimeout || status == http.StatusGatewayTimeout || status == 524 {
+			// 网关超时：保留上游的超时语义，交由上层自适应拆分重试。
+			return status, nil, modelTimeoutError(httpErr)
+		}
+		if httpErr != nil {
+			return status, data, httpErr
+		}
+		return status, data, nil
 	}
-	if resp.StatusCode == http.StatusRequestTimeout || resp.StatusCode == http.StatusGatewayTimeout || resp.StatusCode == 524 {
-		return resp.StatusCode, data, modelTimeoutError(errors.New(resp.Status))
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return resp.StatusCode, data, modelHTTPError(resp.StatusCode)
-	}
-	return resp.StatusCode, data, nil
+	return 0, nil, domain.Errorf(domain.CodeDriverError, "模型请求失败")
 }
 
 func modelTimeoutError(cause error) error {
@@ -285,6 +432,17 @@ func openAIEndpoint(baseURL string) (string, error) {
 	}
 	if !strings.HasSuffix(strings.ToLower(u.Path), "/chat/completions") {
 		u.Path = strings.TrimRight(u.Path, "/") + "/chat/completions"
+	}
+	return u.String(), nil
+}
+
+func openAIResponsesEndpoint(baseURL string) (string, error) {
+	u, err := parseModelURL(baseURL)
+	if err != nil {
+		return "", err
+	}
+	if !strings.HasSuffix(strings.ToLower(u.Path), "/responses") {
+		u.Path = strings.TrimRight(u.Path, "/") + "/responses"
 	}
 	return u.String(), nil
 }
@@ -315,6 +473,9 @@ func parseModelURL(baseURL string) (*url.URL, error) {
 }
 
 func isProtocolMismatch(status int, body []byte) bool {
+	if status == http.StatusOK && len(body) == 0 {
+		return false
+	}
 	if status == http.StatusNotFound || status == http.StatusMethodNotAllowed || status == http.StatusOK {
 		return true
 	}
@@ -323,7 +484,7 @@ func isProtocolMismatch(status int, body []byte) bool {
 		return false
 	}
 	message := strings.ToLower(string(body))
-	for _, hint := range []string{"chat/completions", "/v1/messages", "x-api-key", "anthropic-version", "unknown endpoint"} {
+	for _, hint := range []string{"chat/completions", "/v1/messages", "/responses", "x-api-key", "anthropic-version", "unknown endpoint"} {
 		if strings.Contains(message, hint) {
 			return true
 		}
