@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -504,5 +503,17 @@ func modelHTTPError(status int) error {
 		return domain.Errorf(domain.CodeRateLimited, "模型服务请求过于频繁，请稍后重试")
 	default:
 		return domain.Errorf(domain.CodeDriverError, "模型服务请求失败（HTTP %d）", status)
+	}
+}
+
+// waitContext 等待指定时长，ctx 取消时提前返回 false。
+func waitContext(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
 	}
 }
