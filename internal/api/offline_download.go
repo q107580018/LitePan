@@ -33,6 +33,7 @@ type addOfflineShareReq struct {
 	FileIDs           []string `json:"file_ids"`
 	TargetParentID    string   `json:"target_parent_id"`
 	TargetDisplayPath string   `json:"target_display_path"`
+	TargetName        string   `json:"target_name"`
 }
 
 type addOfflineTorrentReq struct {
@@ -109,7 +110,7 @@ func (h *Handler) addOfflineShare(w http.ResponseWriter, r *http.Request) {
 	}
 	task, err := h.offlineDownloads.AddShare(r.Context(), offlinedownload.AddShareParams{
 		AccountID: req.AccountID, PreparationID: req.PreparationID, FileIDs: req.FileIDs,
-		TargetParentID: req.TargetParentID, TargetDisplayPath: req.TargetDisplayPath,
+		TargetParentID: req.TargetParentID, TargetDisplayPath: req.TargetDisplayPath, TargetName: req.TargetName,
 	})
 	if err != nil {
 		writeErr(w, err)

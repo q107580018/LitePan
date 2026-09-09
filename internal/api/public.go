@@ -39,5 +39,6 @@ func (h *Handler) publicSystemConfig(w http.ResponseWriter, r *http.Request) {
 		"header_effects_enabled":         h.adminAuth.HeaderEffectsEnabled(r.Context()),
 		"index_strm_auto_detect_enabled": h.adminAuth.IndexStrmAutoDetectEnabled(r.Context()),
 		"pansou_enabled":                 h.settings != nil && h.settings.Bool(settings.KeyPanSouEnabled),
+		"pansou_rename_on_save":          h.settings != nil && h.settings.Bool(settings.KeyPanSouRenameOnSave),
 	})
 }
