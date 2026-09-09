@@ -197,6 +197,45 @@ func TestEnhanceKeepsSuccessfulChunksWhenAnotherChunkFails(t *testing.T) {
 	}
 }
 
+func TestChatUsesOpenAIResponsesFormat(t *testing.T) {
+	svc := newTestService(t, func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/v1/responses" {
+			t.Fatalf("请求路径 = %s", r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer test-key" {
+			t.Fatal("未携带 API Key")
+		}
+		var payload struct {
+			Model        string `json:"model"`
+			Instructions string `json:"instructions"`
+			Input        []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"input"`
+			Text struct {
+				Format map[string]any `json:"format"`
+			} `json:"text"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.Model != "test-model" || payload.Instructions == "" || len(payload.Input) != 1 || payload.Input[0].Role != "user" {
+			t.Fatalf("Responses 请求体不正确: %+v", payload)
+		}
+		if payload.Text.Format != nil {
+			t.Fatalf("Responses 兼容请求不应强制 text.format: %+v", payload.Text.Format)
+		}
+		return rawHTTPResponse(http.StatusOK, `{"output":[{"type":"message","content":[{"type":"output_text","text":"{\"ok\":true}"}]}]}`), nil
+	})
+	if err := svc.Test(context.Background(), UpdateRequest{
+		BaseURL: "https://mock.invalid/v1/responses",
+		APIKey:  "test-key",
+		Model:   "test-model",
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestChatUsesAnthropicMessagesFormat(t *testing.T) {
 	svc := newTestService(t, func(r *http.Request) (*http.Response, error) {
 		if r.URL.Path != "/v1/messages" {

@@ -278,6 +278,8 @@ function cancelName() {
             </div>
           </div>
 
+          <slot name="feedback" />
+
           <div class="ws-foot">
             <AppButton v-if="showTest" variant="secondary" :disabled="testing" @click="emit('test')">{{ testing ? "测试中…" : "测试连接" }}</AppButton>
             <AppButton v-if="showRefresh" variant="secondary" :disabled="refreshing" @click="emit('refresh')">{{ refreshing ? "刷库中…" : "手动刷库" }}</AppButton>

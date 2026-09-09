@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
@@ -34,6 +35,7 @@ type cacheEntry struct {
 type Service struct {
 	settings *settings.Service
 	http     *http.Client
+	log      *slog.Logger
 
 	mu        sync.Mutex
 	cache     map[string]cacheEntry
@@ -43,9 +45,16 @@ type Service struct {
 func New(settingsSvc *settings.Service) *Service {
 	return &Service{
 		settings:  settingsSvc,
+		log:       slog.Default(),
 		http:      httpx.NewClient(httpx.ClientOptions{Timeout: 60 * time.Second}),
 		cache:     make(map[string]cacheEntry),
 		protocols: make(map[string]modelProtocol),
+	}
+}
+
+func (s *Service) SetLogger(log *slog.Logger) {
+	if log != nil {
+		s.log = log
 	}
 }
 
@@ -157,10 +166,27 @@ func reportRecognitionProgress(progress recognition.ProgressFunc, state recognit
 	}
 }
 
-func (s *Service) Test(ctx context.Context, in UpdateRequest) error {
+func (s *Service) Test(ctx context.Context, in UpdateRequest) (testErr error) {
 	if s == nil {
 		return domain.Errorf(domain.CodeInternal, "AI 辅助增强服务未就绪")
 	}
+	started := time.Now()
+	defer func() {
+		logger := s.log
+		if logger == nil {
+			logger = slog.Default()
+		}
+		attrs := []any{"duration_ms", time.Since(started).Milliseconds()}
+		if testErr != nil {
+			attrs = append(attrs, "error", safeDiagnostic(testErr.Error(), in.BaseURL, []string{in.APIKey}, 2048))
+			logger.WarnContext(ctx, "AI 连接测试失败", attrs...)
+		} else {
+			logger.InfoContext(ctx, "AI 连接测试成功", attrs...)
+		}
+	}()
+	// 整个测试（包含协议回退）应在前端 90 秒超时前结束。
+	ctx, cancel := context.WithTimeout(ctx, 75*time.Second)
+	defer cancel()
 	stored, found := s.storedConfigForTest(in.ID)
 	if strings.TrimSpace(in.ID) != "" && !found {
 		return domain.Errorf(domain.CodeNotFound, "AI 模型配置已不存在，请刷新后重试")

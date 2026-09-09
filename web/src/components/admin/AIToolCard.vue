@@ -17,6 +17,7 @@ const aiConfig = ref<AIOrganizeConfig>({ enabled: false, items: [] });
 const aiOpen = ref(false);
 const aiSaving = ref(false);
 const aiTesting = ref(false);
+const aiTestError = ref("");
 const aiSelectedID = ref("");
 const aiDraft = reactive<Record<string, string>>({
   name: "",
@@ -47,7 +48,7 @@ const workspaceFields: ProxyField[] = [
     label: "API 地址",
     placeholder: "https://api.deepseek.com",
     helpTitle: "API 地址说明",
-    helpBody: "兼容 OpenAI / Anthropic 格式的 API 地址，例如 <code>https://api.deepseek.com</code>。",
+    helpBody: "兼容 OpenAI Chat Completions、OpenAI Responses 或 Anthropic Messages 格式的 API 地址，例如 <code>https://api.deepseek.com</code> 或 <code>https://api.example.com/v1/responses</code>。",
   },
   {
     key: "model",
@@ -109,6 +110,7 @@ function openWorkspace() {
 }
 
 function selectInstance(id: string) {
+  aiTestError.value = "";
   const item = aiConfig.value.items.find((i) => i.id === id);
   if (!item) return;
   aiSelectedID.value = id;
@@ -122,6 +124,7 @@ function selectInstance(id: string) {
 }
 
 function addInstance() {
+  aiTestError.value = "";
   aiSelectedID.value = "";
   Object.assign(aiDraft, {
     name: aiConfig.value.items.length ? `模型 ${aiConfig.value.items.length + 1}` : "模型 1",
@@ -201,6 +204,7 @@ async function test() {
     toast.error("请先填完 API 地址、API Key 和模型名称");
     return;
   }
+  aiTestError.value = "";
   aiTesting.value = true;
   try {
     await aiOrganizeApi.testConfig({
@@ -212,7 +216,8 @@ async function test() {
     });
     toast.success("连接成功，模型已正确返回 JSON");
   } catch (e) {
-    toast.error(getApiErrorMessage(e, "连接测试失败"));
+    aiTestError.value = getApiErrorMessage(e, "连接测试失败");
+    toast.error(aiTestError.value);
   } finally {
     aiTesting.value = false;
   }
@@ -314,11 +319,33 @@ function configCompleteFromInstances(items: AIOrganizeInstanceUpdate[]) {
       @test="test"
       @save="save"
       @cancel="aiOpen = false"
-    />
+    >
+      <template #feedback>
+        <div v-if="aiTestError" class="ai-test-error" role="alert">
+          <strong>连接测试失败</strong>
+          <p>{{ aiTestError }}</p>
+          <p>更多请求详情可在系统日志中搜索“AI”。</p>
+        </div>
+      </template>
+    </ProxyWorkspace>
   </div>
 </template>
 
 <style scoped>
+.ai-test-error {
+  padding: 12px;
+  color: var(--danger);
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.ai-test-error p {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+}
+
 .check-toggle {
   width: 28px;
   height: 28px;
