@@ -29,6 +29,7 @@ export interface AddOfflineSharePayload {
   file_ids: string[];
   target_parent_id: string;
   target_display_path: string;
+  target_name?: string;
 }
 
 export interface AddOfflineTorrentPayload {

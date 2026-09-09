@@ -41,6 +41,7 @@ type OfflineShareSaveRequest struct {
 	Preparation OfflineSharePreparation
 	FileIDs     []string
 	ParentID    string
+	TargetName  string
 }
 
 // OfflineShareResult 描述已转存到目标网盘的顶层内容。
@@ -49,6 +50,7 @@ type OfflineShareResult struct {
 	Size           int64
 	FileID         string
 	ProviderTaskID string
+	ProviderState  string
 	Completed      bool
 	Message        string
 }
@@ -79,12 +81,14 @@ type OfflineAddResult struct {
 // OfflineTaskRef 是公共层持久化后传给驱动刷新的最小引用。
 type OfflineTaskRef struct {
 	ProviderTaskID string
+	ProviderState  string
 	InfoHash       string
 }
 
 // OfflineTaskUpdate 是驱动归一化后的远端任务状态。
 type OfflineTaskUpdate struct {
 	ProviderTaskID string
+	ProviderState  string
 	InfoHash       string
 	Status         string
 	Progress       int
