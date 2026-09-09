@@ -288,6 +288,7 @@ function cancelName() {
           </div>
 
           <slot name="main-extra" />
+          <slot name="feedback" />
 
           <div class="ws-foot">
             <AppButton v-if="showTest" variant="secondary" :disabled="testing" @click="emit('test')">{{ testing ? "测试中…" : "测试连接" }}</AppButton>
