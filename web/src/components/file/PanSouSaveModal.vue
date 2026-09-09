@@ -17,6 +17,7 @@ const props = defineProps<{
   open: boolean;
   item: PanSouItem | null;
   candidates: PanSouSaveCandidate[];
+  renameOnSave?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -135,6 +136,7 @@ async function submit() {
         file_ids: fileIds,
         target_parent_id: parentId,
         target_display_path: path,
+        target_name: props.renameOnSave ? item.title?.trim() || undefined : undefined,
       });
       emit("created", [task], target);
       if (task.status === "success") toast.success("分享已转存到你的网盘");
@@ -192,6 +194,10 @@ async function submit() {
         <template v-else>
           <div class="pansou-save__mode-note">
             {{ chosenCandidate?.reason }} 会保存到下方选择的账号与目录。
+          </div>
+
+          <div v-if="renameOnSave && item?.title" class="pansou-save__rename-note">
+            已开启自动重命名：保存的{{ chosenCandidate?.mode === "share" ? "文件/文件夹" : "文件" }}将命名为「{{ item.title }}」
           </div>
 
           <section class="pansou-save__target">
@@ -323,6 +329,14 @@ async function submit() {
 }
 .pansou-save__mode-note {
   color: var(--text-muted);
+  font-size: 12px;
+}
+.pansou-save__rename-note {
+  padding: 8px 12px;
+  border: 1px dashed var(--brand);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--brand) 8%, transparent);
+  color: var(--brand);
   font-size: 12px;
 }
 .pansou-save__target {

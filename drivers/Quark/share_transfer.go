@@ -2,6 +2,8 @@ package quark
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -54,6 +56,18 @@ func (d *Driver) OfflineDownloadCapabilities() driver.OfflineDownloadCapabilitie
 		RootTargetAllowed:  true,
 	}
 }
+
+type quarkRenameState struct {
+	ParentID     string   `json:"parent_id"`
+	TargetName   string   `json:"target_name"`
+	OriginalName string   `json:"original_name"`
+	ExistingIDs  []string `json:"existing_ids"`
+	Attempts     int      `json:"attempts"`
+}
+
+// maxShareRenameAttempts 自动重命名失败后的最大重试次数；重试期间任务保持进行中，
+// 只有重命名成功（或耗尽重试）才会把任务标记完成并触发完成钩子。
+const maxShareRenameAttempts = 6
 
 type quarkShareState struct {
 	PwdID   string
@@ -123,6 +137,29 @@ func (d *Driver) SaveOfflineShare(ctx context.Context, req driver.OfflineShareSa
 	if len(entries) == 0 {
 		return nil, domain.Errorf(domain.CodeValidation, "请至少选择一个夸克分享文件")
 	}
+	var renameState quarkRenameState
+	var renameStateData string
+	var renameNote string
+	targetName := strings.TrimSpace(req.TargetName)
+	switch {
+	case targetName == "":
+		// 未提供目标名（未开启自动重命名），保持夸克原样保存。
+	case len(entries) != 1:
+		// 仅支持单个文件/文件夹转存后的自动重命名；多个顶层项无法对应用户标题，跳过并给出提示。
+		renameNote = "；自动重命名已跳过（分享含 " + strconv.Itoa(len(entries)) + " 个顶层文件/文件夹，仅支持单个）"
+	default:
+		before, err := d.ListFiles(ctx, req.ParentID)
+		if err != nil {
+			return nil, err
+		}
+		ids := make([]string, 0, len(before))
+		for _, item := range before {
+			ids = append(ids, item.ID)
+		}
+		renameState = quarkRenameState{ParentID: req.ParentID, TargetName: targetName, OriginalName: entries[0].FileName, ExistingIDs: ids}
+		data, _ := json.Marshal(renameState)
+		renameStateData = string(data)
+	}
 	var saved shareSaveData
 	if _, err := d.apiRequest(ctx, http.MethodPost, pathShareSave, nil, map[string]any{
 		"fid_list": fids, "fid_token_list": tokens, "to_pdir_fid": d.normalizeParent(req.ParentID),
@@ -131,14 +168,17 @@ func (d *Driver) SaveOfflineShare(ctx context.Context, req driver.OfflineShareSa
 		return nil, err
 	}
 	completed := strings.TrimSpace(saved.TaskID) == ""
-	message := "夸克分享链接转存完成"
+	message := "夸克分享链接转存完成" + renameNote
 	if !completed {
-		message = "夸克分享转存任务已提交"
+		message = "夸克分享转存任务已提交" + renameNote
 	}
-	return &driver.OfflineShareResult{
-		Name: shareResultName(entries), Size: size,
-		ProviderTaskID: saved.TaskID, Completed: completed, Message: message,
-	}, nil
+	result := &driver.OfflineShareResult{Name: shareResultName(entries), Size: size, ProviderTaskID: saved.TaskID, ProviderState: renameStateData, Completed: completed, Message: message}
+	if completed && renameStateData != "" {
+		if err := d.renameSavedShare(ctx, renameState); err != nil {
+			result.Message += "，但自动重命名失败：" + err.Error()
+		}
+	}
+	return result, nil
 }
 
 func (d *Driver) RefreshOfflineTasks(ctx context.Context, refs []driver.OfflineTaskRef) ([]driver.OfflineTaskUpdate, error) {
@@ -158,9 +198,31 @@ func (d *Driver) RefreshOfflineTasks(ctx context.Context, refs []driver.OfflineT
 		update := driver.OfflineTaskUpdate{ProviderTaskID: taskID, Progress: 0, Status: driver.OfflineStatusRunning, Message: "夸克正在转存分享内容"}
 		switch task.Status {
 		case 2:
+			// 转存已成功。若开启了自动重命名，把“重命名成功”作为任务完成的前置条件：
+			// 重命名成功才置为完成并回填目标名；暂时失败则保持进行中并携带重试次数，
+			// 由后续轮询继续尝试；耗尽重试后才以失败提示完成（内容已入盘，钩子仍触发）。
 			update.Status = driver.OfflineStatusSuccess
 			update.Progress = 100
 			update.Message = "夸克分享链接转存完成"
+			if ref.ProviderState != "" {
+				var st quarkRenameState
+				if err := json.Unmarshal([]byte(ref.ProviderState), &st); err == nil && strings.TrimSpace(st.TargetName) != "" {
+					if err := d.renameSavedShare(ctx, st); err != nil {
+						if st.Attempts+1 >= maxShareRenameAttempts {
+							update.Message += "，但自动重命名失败：" + err.Error()
+						} else {
+							st.Attempts++
+							stateData, _ := json.Marshal(st)
+							update.Status = driver.OfflineStatusRunning
+							update.Progress = 100
+							update.Message = fmt.Sprintf("夸克分享内容已转存，自动重命名重试中（第 %d/%d 次）", st.Attempts, maxShareRenameAttempts)
+							update.ProviderState = string(stateData)
+						}
+					} else {
+						update.Name = st.TargetName
+					}
+				}
+			}
 		case 3:
 			update.Status = driver.OfflineStatusFailed
 			update.Message = "夸克分享链接转存失败"
@@ -169,6 +231,25 @@ func (d *Driver) RefreshOfflineTasks(ctx context.Context, refs []driver.OfflineT
 		updates = append(updates, update)
 	}
 	return updates, nil
+}
+
+func (d *Driver) renameSavedShare(ctx context.Context, state quarkRenameState) error {
+	items, err := d.ListFiles(ctx, state.ParentID)
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		for _, id := range state.ExistingIDs {
+			if item.ID == id {
+				goto next
+			}
+		}
+		if item.Name == state.OriginalName {
+			return d.RenameFile(ctx, item.ID, state.TargetName)
+		}
+	next:
+	}
+	return domain.Errorf(domain.CodeNotFound, "未找到转存后的文件")
 }
 
 func (d *Driver) listSharedRoot(ctx context.Context, pwdID, stoken string) ([]shareEntry, error) {

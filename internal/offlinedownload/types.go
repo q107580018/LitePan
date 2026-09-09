@@ -67,6 +67,7 @@ type Task struct {
 	Source            string             `json:"source"`
 	Name              string             `json:"name"`
 	ProviderTaskID    string             `json:"provider_task_id,omitempty"`
+	ProviderState     string             `json:"-"`
 	InfoHash          string             `json:"info_hash,omitempty"`
 	TargetParentID    string             `json:"target_parent_id"`
 	TargetDisplayPath string             `json:"target_display_path"`
@@ -132,6 +133,7 @@ type AddShareParams struct {
 	FileIDs           []string
 	TargetParentID    string
 	TargetDisplayPath string
+	TargetName        string
 }
 
 type BatchDeleteResult struct {

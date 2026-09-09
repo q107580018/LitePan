@@ -16,10 +16,10 @@ func (r *offlineDownloadTaskRepo) Upsert(ctx context.Context, rec *domain.Offlin
 	_, err := r.db.write.ExecContext(ctx, `
 INSERT INTO offline_download_tasks(
     task_id, account_id, account_name, driver_type, provider_kind, executor_type, source_kind, source, name,
-    provider_task_id, info_hash, target_parent_id, target_display_path, status,
+    provider_task_id, provider_state, info_hash, target_parent_id, target_display_path, status,
     phase, progress, size, downloaded_bytes, speed_bytes, local_temp_path, magnet_diagnostics_json,
     file_id, message, error, remote_delete, created_at, updated_at
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(task_id) DO UPDATE SET
     account_id=excluded.account_id,
     account_name=excluded.account_name,
@@ -30,6 +30,7 @@ ON CONFLICT(task_id) DO UPDATE SET
     source=excluded.source,
     name=excluded.name,
     provider_task_id=excluded.provider_task_id,
+    provider_state=excluded.provider_state,
     info_hash=excluded.info_hash,
     target_parent_id=excluded.target_parent_id,
     target_display_path=excluded.target_display_path,
@@ -48,7 +49,7 @@ ON CONFLICT(task_id) DO UPDATE SET
     created_at=excluded.created_at,
     updated_at=excluded.updated_at`,
 		rec.TaskID, rec.AccountID, rec.AccountName, rec.DriverType, rec.ProviderKind, rec.ExecutorType, rec.SourceKind, rec.Source, rec.Name,
-		rec.ProviderTaskID, rec.InfoHash, rec.TargetParentID, rec.TargetDisplayPath, rec.Status,
+		rec.ProviderTaskID, rec.ProviderState, rec.InfoHash, rec.TargetParentID, rec.TargetDisplayPath, rec.Status,
 		rec.Phase, rec.Progress, rec.Size, rec.DownloadedBytes, rec.SpeedBytes, rec.LocalTempPath, rec.MagnetDiagnosticsJSON,
 		rec.FileID, rec.Message, rec.Error, rec.RemoteDelete, rec.CreatedAt, rec.UpdatedAt,
 	)
@@ -72,7 +73,7 @@ func (r *offlineDownloadTaskRepo) DeleteByAccount(ctx context.Context, accountID
 func (r *offlineDownloadTaskRepo) List(ctx context.Context) ([]*domain.OfflineDownloadTaskRecord, error) {
 	rows, err := r.db.read.QueryContext(ctx, `
 SELECT task_id, account_id, account_name, driver_type, provider_kind, executor_type, source_kind, source, name,
-       provider_task_id, info_hash, target_parent_id, target_display_path, status,
+       provider_task_id, provider_state, info_hash, target_parent_id, target_display_path, status,
        phase, progress, size, downloaded_bytes, speed_bytes, local_temp_path, magnet_diagnostics_json,
        file_id, message, error, remote_delete, created_at, updated_at
 FROM offline_download_tasks ORDER BY created_at DESC`)
@@ -95,7 +96,7 @@ func scanOfflineDownloadTask(rows *sql.Rows) (*domain.OfflineDownloadTaskRecord,
 	var rec domain.OfflineDownloadTaskRecord
 	err := rows.Scan(
 		&rec.TaskID, &rec.AccountID, &rec.AccountName, &rec.DriverType, &rec.ProviderKind, &rec.ExecutorType, &rec.SourceKind, &rec.Source, &rec.Name,
-		&rec.ProviderTaskID, &rec.InfoHash, &rec.TargetParentID, &rec.TargetDisplayPath, &rec.Status,
+		&rec.ProviderTaskID, &rec.ProviderState, &rec.InfoHash, &rec.TargetParentID, &rec.TargetDisplayPath, &rec.Status,
 		&rec.Phase, &rec.Progress, &rec.Size, &rec.DownloadedBytes, &rec.SpeedBytes, &rec.LocalTempPath, &rec.MagnetDiagnosticsJSON,
 		&rec.FileID, &rec.Message, &rec.Error, &rec.RemoteDelete, &rec.CreatedAt, &rec.UpdatedAt,
 	)

@@ -28,6 +28,7 @@ interface PanSouConfigData {
   password_configured: boolean;
   token_configured: boolean;
   platforms: string[];
+  rename_on_save: boolean;
 }
 
 const cfg = ref<PanSouConfigData>({
@@ -37,6 +38,7 @@ const cfg = ref<PanSouConfigData>({
   password_configured: false,
   token_configured: false,
   platforms: [],
+  rename_on_save: false,
 });
 const saving = ref(false);
 const configOpen = ref(false);
@@ -101,6 +103,7 @@ async function load() {
       password_configured: Boolean(d.password_configured),
       token_configured: Boolean(d.token_configured),
       platforms: normalizePanSouTypes(d.platforms),
+      rename_on_save: Boolean(d.rename_on_save),
     };
   } catch (e) {
     toast.error(getApiErrorMessage(e, "加载 PanSou 设置失败"));
@@ -122,6 +125,7 @@ async function toggleEnabled() {
       endpoint: cfg.value.endpoint,
       username: cfg.value.username,
       platforms: cfg.value.platforms,
+      rename_on_save: cfg.value.rename_on_save,
     });
     cfg.value.enabled = next;
     toast.success(
@@ -157,6 +161,7 @@ async function saveConfig() {
       password: draft.password,
       token: draft.token,
       platforms: draft.types,
+      rename_on_save: cfg.value.rename_on_save,
     });
     await load();
     toast.success("PanSou 配置已保存，前台搜索将使用新的服务与平台范围");
@@ -326,6 +331,14 @@ function openSave(item: PanSouItem) {
           />
         </div>
 
+        <div class="ps-field ps-field--check">
+          <label>
+            <input v-model="cfg.rename_on_save" type="checkbox" />
+            转存时使用 PanSou 标题重命名
+          </label>
+          <small>适用于单个夸克文件或文件夹；关闭后保持网盘原始名称。</small>
+        </div>
+
         <div class="ps-field">
           <label class="ps-field__label-row">
             <span>搜索平台范围（不选表示搜索全部类型）</span>
@@ -398,6 +411,7 @@ function openSave(item: PanSouItem) {
       :open="saveOpen"
       :item="saveItem"
       :candidates="saveItem ? saveCandidates(saveItem) : []"
+      :rename-on-save="cfg.rename_on_save"
       @close="saveOpen = false"
     />
   </div>

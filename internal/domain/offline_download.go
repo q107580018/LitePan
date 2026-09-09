@@ -14,6 +14,7 @@ type OfflineDownloadTaskRecord struct {
 	Source                string
 	Name                  string
 	ProviderTaskID        string
+	ProviderState         string
 	InfoHash              string
 	TargetParentID        string
 	TargetDisplayPath     string

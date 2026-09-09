@@ -57,6 +57,7 @@ const (
 	KeyPanSouPassword              = "pansou_password"
 	KeyPanSouToken                 = "pansou_token"
 	KeyPanSouPlatforms             = "pansou_platforms"
+	KeyPanSouRenameOnSave          = "pansou_rename_on_save"
 	KeyLocalUploadEnabled          = "local_upload_enabled"
 	KeyLocalUploadMappings         = "local_upload_mappings"
 	KeyCoverExtractEnabled         = "cover_extract_enabled"
@@ -208,6 +209,7 @@ func defaultSpecs() []Spec {
 		{Key: KeyPanSouPassword, Type: TypeString, Category: "pansou", Label: "Basic Auth 密码", Description: "可选的 Basic Auth 密码。", Sensitive: true},
 		{Key: KeyPanSouToken, Type: TypeString, Category: "pansou", Label: "API Token", Description: "可选的 API Token。", Sensitive: true},
 		stringSpec(KeyPanSouPlatforms, "pansou", "搜索平台", "用逗号分隔平台标识，例如 115,quark,magnet。", "115,quark,magnet,baidu,aliyun,xunlei,tianyi,uc,pikpak"),
+		boolSpec(KeyPanSouRenameOnSave, "pansou", "转存时使用 PanSou 标题重命名", "一键转存单个夸克文件或文件夹时使用搜索结果标题作为名称。", "false"),
 		selectSpec(KeyStrmMetadataSyncMode, "strm", "元数据同步策略", "local_primary=保留本地并从云端补缺；cloud_primary=本地目录与云端保持一致；bidirectional=本地与云端互相补缺。", "local_primary", []Option{
 			{Value: "cloud_primary", Label: "网盘元数据为主"},
 			{Value: "local_primary", Label: "本地元数据补缺"},

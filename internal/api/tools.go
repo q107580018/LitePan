@@ -63,12 +63,13 @@ func normalizePanSouPlatforms(raw []string) []string {
 }
 
 type panSouConfig struct {
-	Enabled   bool     `json:"enabled"`
-	Endpoint  string   `json:"endpoint"`
-	Username  string   `json:"username"`
-	Password  string   `json:"password,omitempty"`
-	Token     string   `json:"token,omitempty"`
-	Platforms []string `json:"platforms"`
+	Enabled      bool     `json:"enabled"`
+	Endpoint     string   `json:"endpoint"`
+	Username     string   `json:"username"`
+	Password     string   `json:"password,omitempty"`
+	Token        string   `json:"token,omitempty"`
+	Platforms    []string `json:"platforms"`
+	RenameOnSave bool     `json:"rename_on_save"`
 }
 
 func (h *Handler) panSouConfig() panSouConfig {
@@ -76,13 +77,13 @@ func (h *Handler) panSouConfig() panSouConfig {
 		return panSouConfig{Endpoint: "https://so.252035.xyz"}
 	}
 	platforms := normalizePanSouPlatforms(splitPanSouPlatforms(h.settings.String(settings.KeyPanSouPlatforms)))
-	return panSouConfig{Enabled: h.settings.Bool(settings.KeyPanSouEnabled), Endpoint: h.settings.String(settings.KeyPanSouEndpoint), Username: h.settings.String(settings.KeyPanSouUsername), Password: h.settings.StringAllowEmpty(settings.KeyPanSouPassword), Token: h.settings.StringAllowEmpty(settings.KeyPanSouToken), Platforms: platforms}
+	return panSouConfig{Enabled: h.settings.Bool(settings.KeyPanSouEnabled), Endpoint: h.settings.String(settings.KeyPanSouEndpoint), Username: h.settings.String(settings.KeyPanSouUsername), Password: h.settings.StringAllowEmpty(settings.KeyPanSouPassword), Token: h.settings.StringAllowEmpty(settings.KeyPanSouToken), Platforms: platforms, RenameOnSave: h.settings.Bool(settings.KeyPanSouRenameOnSave)}
 }
 
 func (h *Handler) getPanSouConfig(w http.ResponseWriter, r *http.Request) {
 	cfg := h.panSouConfig()
 	cfg.Password, cfg.Token = "", ""
-	writeOK(w, map[string]any{"enabled": cfg.Enabled, "endpoint": cfg.Endpoint, "username": cfg.Username, "password_configured": h.settings.StringAllowEmpty(settings.KeyPanSouPassword) != "", "token_configured": h.settings.StringAllowEmpty(settings.KeyPanSouToken) != "", "platforms": cfg.Platforms})
+	writeOK(w, map[string]any{"enabled": cfg.Enabled, "endpoint": cfg.Endpoint, "username": cfg.Username, "password_configured": h.settings.StringAllowEmpty(settings.KeyPanSouPassword) != "", "token_configured": h.settings.StringAllowEmpty(settings.KeyPanSouToken) != "", "platforms": cfg.Platforms, "rename_on_save": cfg.RenameOnSave})
 }
 
 func (h *Handler) updatePanSouConfig(w http.ResponseWriter, r *http.Request) {
@@ -91,7 +92,7 @@ func (h *Handler) updatePanSouConfig(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	values := map[string]string{settings.KeyPanSouEnabled: strconv.FormatBool(in.Enabled), settings.KeyPanSouEndpoint: strings.TrimRight(strings.TrimSpace(in.Endpoint), "/"), settings.KeyPanSouUsername: strings.TrimSpace(in.Username), settings.KeyPanSouPlatforms: strings.Join(normalizePanSouPlatforms(in.Platforms), ",")}
+	values := map[string]string{settings.KeyPanSouEnabled: strconv.FormatBool(in.Enabled), settings.KeyPanSouEndpoint: strings.TrimRight(strings.TrimSpace(in.Endpoint), "/"), settings.KeyPanSouUsername: strings.TrimSpace(in.Username), settings.KeyPanSouPlatforms: strings.Join(normalizePanSouPlatforms(in.Platforms), ","), settings.KeyPanSouRenameOnSave: strconv.FormatBool(in.RenameOnSave)}
 	if in.Password != "" {
 		values[settings.KeyPanSouPassword] = in.Password
 	}

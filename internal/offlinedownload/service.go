@@ -237,7 +237,7 @@ func (s *Service) AddShare(ctx context.Context, p AddShareParams) (*Task, error)
 			return domain.Errorf(domain.CodeNotImplement, "当前网盘不支持分享链接转存")
 		}
 		result, err = provider.SaveOfflineShare(ctx, driver.OfflineShareSaveRequest{
-			Preparation: prepared.value, FileIDs: fileIDs, ParentID: p.TargetParentID,
+			Preparation: prepared.value, FileIDs: fileIDs, ParentID: p.TargetParentID, TargetName: p.TargetName,
 		})
 		return err
 	})
@@ -264,7 +264,7 @@ func (s *Service) AddShare(ctx context.Context, p AddShareParams) (*Task, error)
 		Name:           strutil.FirstNonEmpty(strings.TrimSpace(result.Name), prepared.value.Name, "分享文件"),
 		TargetParentID: p.TargetParentID, TargetDisplayPath: normalizeDisplayPath(p.TargetDisplayPath),
 		Status: status, Phase: phase, Progress: progress, Size: result.Size,
-		ProviderTaskID: result.ProviderTaskID, FileID: result.FileID, Message: strutil.FirstNonEmpty(strings.TrimSpace(result.Message), "分享链接转存完成"),
+		ProviderTaskID: result.ProviderTaskID, ProviderState: result.ProviderState, FileID: result.FileID, Message: strutil.FirstNonEmpty(strings.TrimSpace(result.Message), "分享链接转存完成"),
 		CreatedAt: timeutil.UnixFloat(now), UpdatedAt: timeutil.UnixFloat(now),
 	}
 	s.putTask(task)
@@ -539,6 +539,7 @@ func (s *Service) Refresh(ctx context.Context, accountID int64, force bool) erro
 		}
 		groups[task.AccountID] = append(groups[task.AccountID], driver.OfflineTaskRef{
 			ProviderTaskID: task.ProviderTaskID,
+			ProviderState:  task.ProviderState,
 			InfoHash:       task.InfoHash,
 		})
 	}
@@ -768,6 +769,9 @@ func (s *Service) applyUpdates(accountID int64, updates []driver.OfflineTaskUpda
 		if update.Message != "" {
 			task.Message = update.Message
 		}
+		if update.ProviderState != "" {
+			task.ProviderState = update.ProviderState
+		}
 		task.Error = update.Error
 		task.UpdatedAt = timeutil.UnixFloat(time.Now())
 		if task.Status == driver.OfflineStatusSuccess && task.SourceKind == SourceShare {
@@ -942,7 +946,7 @@ func normalizeShareFileIDs(requested []string, files []driver.OfflineShareFile) 
 }
 
 func (t Task) ref() driver.OfflineTaskRef {
-	return driver.OfflineTaskRef{ProviderTaskID: t.ProviderTaskID, InfoHash: t.InfoHash}
+	return driver.OfflineTaskRef{ProviderTaskID: t.ProviderTaskID, ProviderState: t.ProviderState, InfoHash: t.InfoHash}
 }
 
 func (t Task) refKey() string {
@@ -1104,7 +1108,7 @@ func recordFromTask(task *Task) *domain.OfflineDownloadTaskRecord {
 		TaskID: task.TaskID, AccountID: task.AccountID, AccountName: task.AccountName,
 		DriverType: task.DriverType, ProviderKind: providerKind, ExecutorType: task.ExecutorType,
 		SourceKind: task.SourceKind, Source: task.Source,
-		Name: task.Name, ProviderTaskID: task.ProviderTaskID, InfoHash: task.InfoHash,
+		Name: task.Name, ProviderTaskID: task.ProviderTaskID, ProviderState: task.ProviderState, InfoHash: task.InfoHash,
 		TargetParentID: task.TargetParentID, TargetDisplayPath: task.TargetDisplayPath,
 		Status: task.Status, Phase: task.Phase, Progress: task.Progress, Size: task.Size,
 		DownloadedBytes: task.DownloadedBytes, SpeedBytes: task.SpeedBytes, LocalTempPath: task.LocalTempPath, MagnetDiagnosticsJSON: diagnosticsJSON,
@@ -1124,7 +1128,7 @@ func taskFromRecord(rec *domain.OfflineDownloadTaskRecord) *Task {
 		TaskID: rec.TaskID, AccountID: rec.AccountID, AccountName: rec.AccountName,
 		DriverType: rec.DriverType, ProviderKind: providerKind, ExecutorType: rec.ExecutorType,
 		SourceKind: rec.SourceKind, Source: rec.Source,
-		Name: rec.Name, ProviderTaskID: rec.ProviderTaskID, InfoHash: rec.InfoHash,
+		Name: rec.Name, ProviderTaskID: rec.ProviderTaskID, ProviderState: rec.ProviderState, InfoHash: rec.InfoHash,
 		TargetParentID: rec.TargetParentID, TargetDisplayPath: rec.TargetDisplayPath,
 		Status: rec.Status, Phase: rec.Phase, Progress: rec.Progress, Size: rec.Size,
 		DownloadedBytes: rec.DownloadedBytes, SpeedBytes: rec.SpeedBytes, LocalTempPath: rec.LocalTempPath, MagnetDiagnostics: diagnostics,
