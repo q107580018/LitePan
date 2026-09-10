@@ -8,26 +8,26 @@ LitePan is a Go service with a Vue/TypeScript web client.
 - `internal/` holds application services, storage, HTTP/API wiring, caching, mounts, and domain logic; keep package boundaries consistent with `.golangci.yml`.
 - `drivers/` contains integrations for supported cloud-storage providers. `drivers/template/` is the starting point for a new provider.
 - `pkg/` contains reusable, business-independent utilities.
-- `web/src/` contains Vue views, routing, assets, and client-side code; `web/scripts/` contains build helpers.
+- `web/src/` contains Vue views, routing, assets, and client-side code; `web/scripts/` contains build helpers. The frontend build writes embedded assets to `internal/api/web/`.
 - `docs/pictures/` stores documentation images. `data/`, `strm/`, and `mounts/` are runtime/data directories and should not receive generated development artifacts.
 
 ## Build, Test, and Development Commands
 
-Run commands from the repository root unless noted:
+Run commands from the repository root unless noted. Go 1.26.6 is required by `go.mod`; the container build uses Node.js 22 for the frontend.
 
 ```bash
 make test                 # Go tests with the race detector
 make lint                 # golangci-lint using .golangci.yml
 make build                # Go build with FUSE support
-make build-nofuse        # Go build without FUSE support
+make build-nofuse         # Go build without FUSE support
 cd web && npm ci          # Install the locked frontend dependencies
 cd web && npm run dev     # Start the Vite development server
-cd web && npm run build   # Type-check, bundle, and compress frontend assets
+cd web && npm run build   # Type-check, bundle, compress, and update embedded assets
 make docker-up            # Build and start the local Compose stack
 make docker-down          # Stop the Compose stack
 ```
 
-Use `make lint-install` when `golangci-lint` is not installed. The Docker build compiles the frontend first and embeds the generated web output into the Go image.
+Use `make lint-install` when `golangci-lint` is not installed. Go build targets use the assets already present in `internal/api/web/`; run the frontend build after changing `web/`. The Docker build compiles the frontend first and embeds the generated web output into the Go image.
 
 ## Coding Style & Naming Conventions
 
