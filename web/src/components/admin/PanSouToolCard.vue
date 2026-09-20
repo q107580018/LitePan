@@ -6,7 +6,7 @@ import type { Account } from "@/api/types";
 import type { OfflineDownloadCapabilities } from "@/types/offline-download";
 import AppButton from "@/components/base/AppButton.vue";
 import AppModal from "@/components/base/AppModal.vue";
-import CloudToolCard from "@/components/admin/CloudToolCard.vue";
+import ToolCard from "@/components/admin/ToolCard.vue";
 import { copyTextToClipboard, toast } from "@/composables/useToast";
 import {
   normalizePanSouTypes,
@@ -260,7 +260,7 @@ function openSave(item: PanSouItem) {
 
 <template>
   <div v-show="matches('影视搜索转存') || matches('PanSou') || matches('盘搜')">
-    <CloudToolCard
+    <ToolCard
       :enabled="cfg.enabled"
       name="影视搜索转存"
       driver="PanSou · 聚合网盘资源搜索"
@@ -295,7 +295,7 @@ function openSave(item: PanSouItem) {
       <template #actions>
         <AppButton size="sm" variant="secondary" :disabled="saving" @click="openConfig">配置</AppButton>
       </template>
-    </CloudToolCard>
+    </ToolCard>
 
     <AppModal :open="configOpen" title="影视搜索转存 · 配置" size="md" @close="closeConfig">
       <div class="ps-config">
