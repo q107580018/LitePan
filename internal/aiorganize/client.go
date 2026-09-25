@@ -493,16 +493,6 @@ func isProtocolMismatch(status int, body []byte) bool {
 	return false
 }
 
-func waitContext(ctx context.Context, delay time.Duration) bool {
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-timer.C:
-		return true
-	}
-}
 
 func modelHTTPError(status int) error {
 	switch status {
