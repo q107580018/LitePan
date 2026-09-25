@@ -16,6 +16,8 @@ export function useFileTableInline(options: {
   isAdmin: Ref<boolean>;
   loading: Ref<boolean>;
   createFolderRequest: Ref<number>;
+  // 选中操作栏「重命名」按钮通过递增该计数触发，对唯一选中项开启行内重命名。
+  renameRequest: Ref<number>;
   // 外部（批量删除/移动/复制）下发的行内操作状态，与内部重命名/单删状态合并展示。
   externalRowOps?: Ref<Record<string, FileRowOperation> | undefined>;
   renameFile: (file: FileItem, newName: string) => Promise<boolean>;
@@ -161,6 +163,16 @@ export function useFileTableInline(options: {
     await focusRenameInput(file);
   }
 
+  // 仅当恰好选中一项时开启行内重命名；其余情况静默忽略（操作栏按钮已按同样规则禁用）。
+  async function startInlineRenameForSelection() {
+    if (!options.isAdmin.value || renameSaving.value) return;
+    const selected = options.files.value.filter((f) =>
+      options.selectedIds.value.includes(fileKey(f)),
+    );
+    if (selected.length !== 1) return;
+    await startInlineRename(selected[0]);
+  }
+
   function cancelInlineRename() {
     if (renameSaving.value) return;
     renamingId.value = null;
@@ -278,6 +290,13 @@ export function useFileTableInline(options: {
     () => options.createFolderRequest.value,
     (next, prev) => {
       if (next && next !== prev) void startInlineCreateFolder();
+    },
+  );
+
+  watch(
+    () => options.renameRequest.value,
+    (next, prev) => {
+      if (next && next !== prev) void startInlineRenameForSelection();
     },
   );
 

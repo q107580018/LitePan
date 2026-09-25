@@ -29,6 +29,7 @@ import BreadcrumbNav from "./BreadcrumbNav.vue";
 import FavoritesSidebar from "./FavoritesSidebar.vue";
 import FileToolbar from "./FileToolbar.vue";
 import FileTable from "./FileTable.vue";
+import SelectionActionBar from "./SelectionActionBar.vue";
 import FilePreviewHost from "./FilePreviewHost.vue";
 import BusySpinner from "@/components/base/BusySpinner.vue";
 import type { ActiveFilePreview, FilePreviewKind } from "./filePreview";
@@ -69,6 +70,8 @@ const view = ref<"list" | "grid">(
 );
 const selectedIds = ref<string[]>([]);
 const createFolderRequest = ref(0);
+// 选中操作栏「重命名」请求计数，FileTable 监听后对唯一选中项开启行内重命名。
+const renameRequest = ref(0);
 const uploadFileInput = ref<HTMLInputElement | null>(null);
 const uploadFolderInput = ref<HTMLInputElement | null>(null);
 const accountSwitchMode = ref<"dropdown" | "floating">(readSavedAccountSwitchMode());
@@ -151,6 +154,37 @@ const fileActions = useFileActions({
   addFolderLocally: (folder) => store.addFolderLocally(folder),
   reloadFiles: (opts) => store.loadFiles({ ...opts, silent: true }),
 });
+
+// 选中操作栏：操作期间禁用按钮，避免重复提交。
+const selectionActing = computed(() => fileActions.acting.value);
+
+/** 操作栏「重命名」：仅对唯一选中项生效（多选不支持批量重命名）。 */
+function handleSelectionRename() {
+  if (selectedFiles.value.length !== 1) return;
+  renameRequest.value += 1;
+}
+
+/** 操作栏「下载」：仅单选且为文件时可用。 */
+function handleSelectionDownload() {
+  const file = selectedFiles.value[0];
+  if (selectedFiles.value.length === 1 && file && !file.is_dir) {
+    fileActions.downloadFile(file);
+  }
+}
+
+/** 操作栏「删除」：单选走单删确认，多选走批量删除确认。 */
+function handleSelectionDelete() {
+  if (selectedFiles.value.length === 1) {
+    void fileActions.deleteFile(selectedFiles.value[0]);
+    return;
+  }
+  fileActions.requestBatchDelete();
+}
+
+/** 操作栏「取消选择」：清空选中并收起操作栏。 */
+function clearSelection() {
+  selectedIds.value = [];
+}
 
 const coverExtractEnabled = ref(false);
 
@@ -1114,6 +1148,7 @@ homeFooterStatus.onOpenTaskPanel(openTaskPanel);
             :sort-order="sortOrder"
             :sort-class="sortClass"
             :create-folder-request="createFolderRequest"
+            :rename-request="renameRequest"
             :row-operations="fileActions.rowOps"
             v-model:selected-ids="selectedIds"
             :rename-file="fileActions.renameFile"
@@ -1146,6 +1181,20 @@ homeFooterStatus.onOpenTaskPanel(openTaskPanel);
         </div>
       </div>
     </div>
+
+    <!-- 选中项悬浮操作栏：单选/多选后直接可点，手机上无需右键 -->
+    <SelectionActionBar
+      v-if="isAdmin"
+      :selected-files="selectedFiles"
+      :acting="selectionActing"
+      :floating-accounts="floatingAccountSwitchEnabled"
+      @rename="handleSelectionRename"
+      @download="handleSelectionDownload"
+      @move="fileActions.requestBatchMove"
+      @copy="fileActions.requestBatchCopy"
+      @delete="handleSelectionDelete"
+      @clear="clearSelection"
+    />
 
     <FolderPickerModal
       :open="fileActions.transfer.open"

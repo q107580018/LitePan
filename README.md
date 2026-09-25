@@ -150,7 +150,7 @@ docker compose up -d
 docker pull ghcr.io/q107580018/litepan:latest
 ```
 
-如需固定当前版本，可将 Compose 中的镜像改为 `ghcr.io/q107580018/litepan:v0.6.3`。推送到 `main` 或创建版本标签后，GitHub Actions 会构建并发布 amd64/arm64 镜像。
+如需固定当前版本，可将 Compose 中的镜像改为 `ghcr.io/q107580018/litepan:v0.6.4`。推送到 `main` 或创建版本标签后，GitHub Actions 会构建并发布 amd64/arm64 镜像。
 
 ### 从源码运行
 

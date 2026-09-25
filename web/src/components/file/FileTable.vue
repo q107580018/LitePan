@@ -23,6 +23,8 @@ const props = defineProps<{
   sortOrder: SortOrder;
   sortClass: (key: SortKey) => SortOrder | "";
   createFolderRequest: number;
+  // 选中操作栏「重命名」触发计数，递增时对唯一选中项开启行内重命名。
+  renameRequest: number;
   rowOperations?: Record<string, FileRowOperation>;
   renameFile: (file: FileItem, newName: string) => Promise<boolean>;
   createFolder: (name: string) => Promise<boolean>;
@@ -65,6 +67,7 @@ const inline = useFileTableInline({
   isAdmin: toRef(props, "isAdmin"),
   loading: toRef(props, "loading"),
   createFolderRequest: toRef(props, "createFolderRequest"),
+  renameRequest: toRef(props, "renameRequest"),
   externalRowOps: toRef(props, "rowOperations"),
   renameFile: (file, name) => props.renameFile(file, name),
   createFolder: (name) => props.createFolder(name),
