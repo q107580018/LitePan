@@ -43,6 +43,51 @@ export function pansouPlatformLabel(code: string): string {
   return PANSOU_PLATFORM_LABELS[code] || code || "资源";
 }
 
+/** “转存时使用 PanSou 标题重命名”的可选范围。 */
+export const PANSOU_RENAME_TARGETS = [
+  { code: "quark", label: "夸克分享转存" },
+  { code: "115", label: "115 分享转存" },
+  { code: "magnet", label: "115 磁力/电驴" },
+] as const;
+
+export type PanSouRenameTarget = (typeof PANSOU_RENAME_TARGETS)[number]["code"];
+
+export const PANSOU_RENAME_LABELS: Record<string, string> = Object.fromEntries(
+  PANSOU_RENAME_TARGETS.map((target) => [target.code, target.label]),
+);
+
+/** 归一化重命名范围列表（去重、过滤无效代号）。 */
+export function normalizePanSouRenameTargets(
+  raw: string[] | string | undefined | null,
+): string[] {
+  if (!raw) return [];
+  const valid = new Set<string>(PANSOU_RENAME_TARGETS.map((target) => target.code));
+  const out: string[] = [];
+  for (const item of Array.isArray(raw) ? raw : String(raw).split(/[,;\s]+/)) {
+    const code = String(item || "").trim().toLowerCase();
+    if (!code || !valid.has(code) || out.includes(code)) continue;
+    out.push(code);
+  }
+  return out;
+}
+
+/**
+ * 计算某个转存候选对应的重命名范围代号；返回空表示该候选不支持重命名。
+ * 磁力/电驴离线下载的重命名目前仅 115 实现（光鸭等驱动会忽略目标名）。
+ */
+export function renameTargetForCandidate(candidate: {
+  driverType: string;
+  mode: "share" | "url";
+}): string {
+  const driver = String(candidate.driverType || "").toLowerCase();
+  if (candidate.mode === "share") {
+    if (driver === "quark") return "quark";
+    if (driver === "115_open") return "115";
+    return "";
+  }
+  return driver === "115_open" ? "magnet" : "";
+}
+
 /** 只保留上游认可的网盘类型（无效代号会被过滤，避免把结果搜空）。 */
 export function normalizePanSouTypes(raw: string[] | string | undefined | null): string[] {
   const list = Array.isArray(raw)

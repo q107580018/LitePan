@@ -5,6 +5,7 @@ import AppButton from "@/components/base/AppButton.vue";
 import { copyTextToClipboard, toast } from "@/composables/useToast";
 import {
   PANSOU_CLOUD_TYPES,
+  normalizePanSouRenameTargets,
   pansouPlatformLabel,
   panSouTotal,
   parsePanSouPayload,
@@ -40,7 +41,7 @@ interface PlatformGroup {
 }
 
 const enabled = ref(false);
-const renameOnSave = ref(false);
+const renameTargets = ref<string[]>([]);
 const q = ref("");
 const loading = ref(false);
 const searchTakingLong = ref(false);
@@ -53,7 +54,7 @@ onMounted(async () => {
   try {
     const cfg: any = await http.get("/public/system-config");
     enabled.value = Boolean((cfg as any)?.pansou_enabled);
-    renameOnSave.value = Boolean((cfg as any)?.pansou_rename_on_save);
+    renameTargets.value = normalizePanSouRenameTargets((cfg as any)?.pansou_rename_targets);
   } catch {
     /* 首页其他功能不受影响 */
   }
@@ -218,10 +219,10 @@ function saveButtonTitle(item: PanSouItem) {
 async function openSave(item: PanSouItem) {
   if (!props.isAdmin || capsLoading.value || !canSaveItem(item)) return;
   saveItem.value = item;
-  // 每次打开转存弹窗时重新读取服务端配置，避免后台刚开启「重命名」时本页仍是旧值。
+  // 每次打开转存弹窗时重新读取服务端配置，避免后台刚调整「重命名」范围时本页仍是旧值。
   try {
     const cfg: any = await http.get("/public/system-config");
-    renameOnSave.value = Boolean((cfg as any)?.pansou_rename_on_save);
+    renameTargets.value = normalizePanSouRenameTargets((cfg as any)?.pansou_rename_targets);
   } catch {
     /* 忽略：沿用当前值 */
   }
@@ -451,7 +452,7 @@ async function copyPassword(item: PanSouItem) {
     :open="saveOpen"
     :item="saveItem"
     :candidates="saveItem ? candidatesFor(saveItem) : []"
-    :rename-on-save="renameOnSave"
+    :rename-targets="renameTargets"
     @close="saveOpen = false"
     @created="onSaveCreated"
   />

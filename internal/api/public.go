@@ -39,6 +39,8 @@ func (h *Handler) publicSystemConfig(w http.ResponseWriter, r *http.Request) {
 		"header_effects_enabled":         h.adminAuth.HeaderEffectsEnabled(r.Context()),
 		"index_strm_auto_detect_enabled": h.adminAuth.IndexStrmAutoDetectEnabled(r.Context()),
 		"pansou_enabled":                 h.settings != nil && h.settings.Bool(settings.KeyPanSouEnabled),
-		"pansou_rename_on_save":          h.settings != nil && h.settings.Bool(settings.KeyPanSouRenameOnSave),
+		"pansou_rename_targets":          h.panSouRenameTargets(),
+		// 兼容字段：历史前端读布尔开关，现在以 targets 非空为准。
+		"pansou_rename_on_save": len(h.panSouRenameTargets()) > 0,
 	})
 }

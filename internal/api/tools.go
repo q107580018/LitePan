@@ -62,14 +62,62 @@ func normalizePanSouPlatforms(raw []string) []string {
 	return out
 }
 
+// panSouRenameTargetCodes 是“转存时使用 PanSou 标题重命名”可勾选的范围代号。
+var panSouRenameTargetCodes = []string{"quark", "115", "magnet"}
+
+// normalizePanSouRenameTargets 把存储值归一化为有效代号列表。
+// 历史版本存储的是布尔字符串（pansou_rename_on_save=true/false），
+// 这里把 "true" 视为全部范围，"false"/空视为全部关闭。
+func normalizePanSouRenameTargets(raw string) []string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" || strings.EqualFold(trimmed, "false") {
+		return nil
+	}
+	if strings.EqualFold(trimmed, "true") {
+		return append([]string(nil), panSouRenameTargetCodes...)
+	}
+	valid := make(map[string]bool, len(panSouRenameTargetCodes))
+	for _, code := range panSouRenameTargetCodes {
+		valid[code] = true
+	}
+	seen := make(map[string]bool)
+	out := make([]string, 0, len(panSouRenameTargetCodes))
+	for _, token := range splitPanSouPlatforms(trimmed) {
+		if !valid[token] || seen[token] {
+			continue
+		}
+		seen[token] = true
+		out = append(out, token)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// normalizePanSouRenameTargetList 归一化前端提交的代号列表（去重、过滤无效项）。
+func normalizePanSouRenameTargetList(list []string) []string {
+	if len(list) == 0 {
+		return nil
+	}
+	return normalizePanSouRenameTargets(strings.Join(list, ","))
+}
+
 type panSouConfig struct {
-	Enabled      bool     `json:"enabled"`
-	Endpoint     string   `json:"endpoint"`
-	Username     string   `json:"username"`
-	Password     string   `json:"password,omitempty"`
-	Token        string   `json:"token,omitempty"`
-	Platforms    []string `json:"platforms"`
-	RenameOnSave bool     `json:"rename_on_save"`
+	Enabled       bool     `json:"enabled"`
+	Endpoint      string   `json:"endpoint"`
+	Username      string   `json:"username"`
+	Password      string   `json:"password,omitempty"`
+	Token         string   `json:"token,omitempty"`
+	Platforms     []string `json:"platforms"`
+	RenameTargets []string `json:"rename_targets"`
+}
+
+func (h *Handler) panSouRenameTargets() []string {
+	if h.settings == nil {
+		return nil
+	}
+	return normalizePanSouRenameTargets(h.settings.String(settings.KeyPanSouRenameOnSave))
 }
 
 func (h *Handler) panSouConfig() panSouConfig {
@@ -77,13 +125,13 @@ func (h *Handler) panSouConfig() panSouConfig {
 		return panSouConfig{Endpoint: "https://so.252035.xyz"}
 	}
 	platforms := normalizePanSouPlatforms(splitPanSouPlatforms(h.settings.String(settings.KeyPanSouPlatforms)))
-	return panSouConfig{Enabled: h.settings.Bool(settings.KeyPanSouEnabled), Endpoint: h.settings.String(settings.KeyPanSouEndpoint), Username: h.settings.String(settings.KeyPanSouUsername), Password: h.settings.StringAllowEmpty(settings.KeyPanSouPassword), Token: h.settings.StringAllowEmpty(settings.KeyPanSouToken), Platforms: platforms, RenameOnSave: h.settings.Bool(settings.KeyPanSouRenameOnSave)}
+	return panSouConfig{Enabled: h.settings.Bool(settings.KeyPanSouEnabled), Endpoint: h.settings.String(settings.KeyPanSouEndpoint), Username: h.settings.String(settings.KeyPanSouUsername), Password: h.settings.StringAllowEmpty(settings.KeyPanSouPassword), Token: h.settings.StringAllowEmpty(settings.KeyPanSouToken), Platforms: platforms, RenameTargets: h.panSouRenameTargets()}
 }
 
 func (h *Handler) getPanSouConfig(w http.ResponseWriter, r *http.Request) {
 	cfg := h.panSouConfig()
 	cfg.Password, cfg.Token = "", ""
-	writeOK(w, map[string]any{"enabled": cfg.Enabled, "endpoint": cfg.Endpoint, "username": cfg.Username, "password_configured": h.settings.StringAllowEmpty(settings.KeyPanSouPassword) != "", "token_configured": h.settings.StringAllowEmpty(settings.KeyPanSouToken) != "", "platforms": cfg.Platforms, "rename_on_save": cfg.RenameOnSave})
+	writeOK(w, map[string]any{"enabled": cfg.Enabled, "endpoint": cfg.Endpoint, "username": cfg.Username, "password_configured": h.settings.StringAllowEmpty(settings.KeyPanSouPassword) != "", "token_configured": h.settings.StringAllowEmpty(settings.KeyPanSouToken) != "", "platforms": cfg.Platforms, "rename_targets": cfg.RenameTargets})
 }
 
 func (h *Handler) updatePanSouConfig(w http.ResponseWriter, r *http.Request) {
@@ -92,7 +140,7 @@ func (h *Handler) updatePanSouConfig(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	values := map[string]string{settings.KeyPanSouEnabled: strconv.FormatBool(in.Enabled), settings.KeyPanSouEndpoint: strings.TrimRight(strings.TrimSpace(in.Endpoint), "/"), settings.KeyPanSouUsername: strings.TrimSpace(in.Username), settings.KeyPanSouPlatforms: strings.Join(normalizePanSouPlatforms(in.Platforms), ","), settings.KeyPanSouRenameOnSave: strconv.FormatBool(in.RenameOnSave)}
+	values := map[string]string{settings.KeyPanSouEnabled: strconv.FormatBool(in.Enabled), settings.KeyPanSouEndpoint: strings.TrimRight(strings.TrimSpace(in.Endpoint), "/"), settings.KeyPanSouUsername: strings.TrimSpace(in.Username), settings.KeyPanSouPlatforms: strings.Join(normalizePanSouPlatforms(in.Platforms), ","), settings.KeyPanSouRenameOnSave: strings.Join(normalizePanSouRenameTargetList(in.RenameTargets), ",")}
 	if in.Password != "" {
 		values[settings.KeyPanSouPassword] = in.Password
 	}
