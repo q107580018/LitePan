@@ -1557,3 +1557,41 @@ func TestDisplayNameForThunder(t *testing.T) {
 		t.Fatalf("thunder 显示名错误: %q", got)
 	}
 }
+
+func TestTerminalTaskClearsProviderState(t *testing.T) {
+	drv := &offlineTestDriver{}
+	svc := New(Options{
+		Exec:     driverexec.New(offlineTestProvider{drv: drv}, nil),
+		Accounts: offlineAccountRepo{account: &domain.Account{ID: 7, Name: "测试盘", DriverType: "offline-test"}},
+		Repo:     newOfflineTaskRepo(),
+	})
+	drv.addResults = []driver.OfflineAddResult{
+		{Source: "https://example.com/movie.mkv", InfoHash: "hash-1", Success: true, ProviderState: `{"target_name":"标题"}`},
+	}
+	created, err := svc.AddURLs(context.Background(), AddURLParams{
+		AccountID: 7, URLs: []string{"https://example.com/movie.mkv"},
+		TargetParentID: "folder", TargetDisplayPath: "/电影",
+	})
+	if err != nil || len(created) != 1 {
+		t.Fatalf("创建任务失败: tasks=%#v err=%v", created, err)
+	}
+	if created[0].ProviderState == "" {
+		t.Fatal("创建后的任务应携带驱动的 ProviderState")
+	}
+	drv.updates = []driver.OfflineTaskUpdate{{
+		InfoHash: "hash-1", Status: driver.OfflineStatusSuccess, Progress: 100, FileID: "file-1", Name: "标题",
+	}}
+	if err := svc.Refresh(context.Background(), 7, true); err != nil {
+		t.Fatalf("刷新任务失败: %v", err)
+	}
+	tasks, err := svc.List(context.Background(), 7, false)
+	if err != nil || len(tasks) != 1 {
+		t.Fatalf("查询任务失败: tasks=%#v err=%v", tasks, err)
+	}
+	if tasks[0].Status != driver.OfflineStatusSuccess {
+		t.Fatalf("任务应已完成: %#v", tasks[0])
+	}
+	if tasks[0].ProviderState != "" {
+		t.Fatalf("任务进入终态后应清空 ProviderState: %#v", tasks[0])
+	}
+}

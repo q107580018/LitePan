@@ -370,6 +370,7 @@ func (s *Service) AddURLs(ctx context.Context, p AddURLParams) ([]Task, error) {
 			Source:            source,
 			Name:              strutil.FirstNonEmpty(result.Name, displayNameForURL(source)),
 			ProviderTaskID:    result.ProviderTaskID,
+			ProviderState:     result.ProviderState,
 			InfoHash:          result.InfoHash,
 			TargetParentID:    p.TargetParentID,
 			TargetDisplayPath: normalizeDisplayPath(p.TargetDisplayPath),
@@ -771,6 +772,11 @@ func (s *Service) applyUpdates(accountID int64, updates []driver.OfflineTaskUpda
 		}
 		if update.ProviderState != "" {
 			task.ProviderState = update.ProviderState
+		}
+		if isTerminal(task.Status) {
+			// 任务进入终态后不再被刷新，重命名等驱动侧状态一并清空，
+			// 避免完成后的任务永久携带残留状态。
+			task.ProviderState = ""
 		}
 		task.Error = update.Error
 		task.UpdatedAt = timeutil.UnixFloat(time.Now())

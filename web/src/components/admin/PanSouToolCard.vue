@@ -336,7 +336,7 @@ function openSave(item: PanSouItem) {
             <input v-model="cfg.rename_on_save" type="checkbox" />
             转存时使用 PanSou 标题重命名
           </label>
-          <small>适用于单个夸克文件或文件夹；关闭后保持网盘原始名称。</small>
+          <small>适用于单个文件或文件夹（夸克/115 分享转存、115 磁力链接离线下载）；多个顶层项自动跳过，关闭后保持网盘原始名称。</small>
         </div>
 
         <div class="ps-field">

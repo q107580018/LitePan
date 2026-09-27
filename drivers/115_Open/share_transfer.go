@@ -8,13 +8,21 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"litepan/internal/domain"
 	"litepan/internal/driver"
 	"litepan/internal/httpx"
 )
 
-const webAPIBaseURL = "https://webapi.115.com"
+const (
+	webAPIBaseURL = "https://webapi.115.com"
+
+	// maxShareRenameLookups / shareRenameLookupInterval：115 分享转存后目录可见性
+	// 可能短暂延迟，重命名前最多重复查找这么多次。
+	maxShareRenameLookups     = 3
+	shareRenameLookupInterval = time.Second
+)
 
 var (
 	pan115SharePattern = regexp.MustCompile(`(?i)(?:115|anxia|115cdn)\.com/s/([a-z0-9]+)`)
@@ -141,6 +149,26 @@ func (d *Driver) SaveOfflineShare(ctx context.Context, req driver.OfflineShareSa
 	if len(ids) == 0 {
 		return nil, domain.Errorf(domain.CodeValidation, "请至少选择一个 115 分享文件")
 	}
+	// 与夸克一致：仅支持单个文件/文件夹转存后的自动重命名；
+	// 多个顶层项无法对应用户标题时跳过并在结果里提示。
+	// 用独立标志而不是 slice 是否为 nil 表达“是否需要重命名”，
+	// 避免目标目录为空时（before 为空 → existingIDs 保持 nil）漏掉重命名。
+	targetName := strings.TrimSpace(req.TargetName)
+	wantRename := targetName != "" && len(entries) == 1
+	var renameNote string
+	var existingIDs []string
+	if targetName != "" && !wantRename {
+		renameNote = "；自动重命名已跳过（分享含 " + strconv.Itoa(len(entries)) + " 个顶层文件/文件夹，仅支持单个）"
+	}
+	if wantRename {
+		before, err := d.ListFiles(ctx, req.ParentID)
+		if err != nil {
+			return nil, err
+		}
+		for _, item := range before {
+			existingIDs = append(existingIDs, item.ID)
+		}
+	}
 	form := url.Values{
 		"cid": {d.normalizeParent(req.ParentID)}, "share_code": {state.ShareCode},
 		"receive_code": {state.Passcode}, "file_id": {strings.Join(ids, ",")},
@@ -148,10 +176,62 @@ func (d *Driver) SaveOfflineShare(ctx context.Context, req driver.OfflineShareSa
 	if err := d.webShareRequest(ctx, http.MethodPost, "/share/receive", nil, form, nil); err != nil {
 		return nil, err
 	}
-	return &driver.OfflineShareResult{
+	result := &driver.OfflineShareResult{
 		Name: name115ShareResult(entries), Size: size, Completed: true,
-		Message: "115 分享链接转存完成",
-	}, nil
+		Message: "115 分享链接转存完成" + renameNote,
+	}
+	if wantRename {
+		if err := d.renameSaved115Share(ctx, req.ParentID, existingIDs, entries[0].Name, targetName); err != nil {
+			result.Message += "，但自动重命名失败：" + err.Error()
+		} else {
+			result.Name = targetName
+		}
+	}
+	return result, nil
+}
+
+// renameSaved115Share 在转存后的目标目录里找到新增且名字匹配的顶层项并重命名。
+// 115 的 /share/receive 虽为同步接口，但文件在目标目录可见可能短暂延迟，
+// 因此对“查找新增项”做短间隔重试；找到后的 RenameFile 被拒（如目标名非法）
+// 多为永久性错误，不重试直接返回。
+func (d *Driver) renameSaved115Share(ctx context.Context, parentID string, existingIDs []string, originalName, targetName string) error {
+	var lastErr error
+	for attempt := 0; attempt < maxShareRenameLookups; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-time.After(shareRenameLookupInterval):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		newID, err := d.findSaved115ShareID(ctx, parentID, existingIDs, originalName)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		return d.RenameFile(ctx, newID, targetName)
+	}
+	return lastErr
+}
+
+func (d *Driver) findSaved115ShareID(ctx context.Context, parentID string, existingIDs []string, originalName string) (string, error) {
+	items, err := d.ListFiles(ctx, parentID)
+	if err != nil {
+		return "", err
+	}
+	existing := make(map[string]struct{}, len(existingIDs))
+	for _, id := range existingIDs {
+		existing[id] = struct{}{}
+	}
+	for _, item := range items {
+		if _, ok := existing[item.ID]; ok {
+			continue
+		}
+		if item.Name == originalName {
+			return item.ID, nil
+		}
+	}
+	return "", domain.Errorf(domain.CodeNotFound, "未找到转存后的文件")
 }
 
 func (d *Driver) webShareRequest(ctx context.Context, method, path string, query, form url.Values, out any) error {
