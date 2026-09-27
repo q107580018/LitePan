@@ -5,6 +5,7 @@ import { offlineDownloadApi } from "@/api/offlineDownload";
 import { getApiErrorMessage } from "@/api/client";
 import { toast } from "@/composables/useToast";
 import type { OfflineDownloadTask } from "@/types/offline-download";
+import { renameTargetForCandidate } from "@/utils/pansou";
 import type { PanSouItem } from "@/utils/pansou";
 import type { PanSouSaveCandidate } from "@/utils/pansouSave";
 import AppModal from "@/components/base/AppModal.vue";
@@ -17,7 +18,8 @@ const props = defineProps<{
   open: boolean;
   item: PanSouItem | null;
   candidates: PanSouSaveCandidate[];
-  renameOnSave?: boolean;
+  /** 已开启「转存时使用 PanSou 标题重命名」的范围代号列表。 */
+  renameTargets?: string[];
 }>();
 
 const emit = defineEmits<{
@@ -34,6 +36,17 @@ const targetPath = ref("/");
 
 const chosenCandidate = computed(
   () => props.candidates.find((c) => c.accountId === chosenAccountId.value) ?? props.candidates[0] ?? null,
+);
+/** 当前候选对应的重命名范围代号（空 = 不支持重命名）。 */
+const renameTarget = computed(() =>
+  chosenCandidate.value ? renameTargetForCandidate(chosenCandidate.value) : "",
+);
+/** 该候选是否在配置的范围内启用自动重命名。 */
+const renameEnabled = computed(
+  () =>
+    Boolean(props.item?.title) &&
+    renameTarget.value !== "" &&
+    (props.renameTargets ?? []).includes(renameTarget.value),
 );
 const displayAccount = computed(() => {
   const candidate = chosenCandidate.value;
@@ -136,7 +149,7 @@ async function submit() {
         file_ids: fileIds,
         target_parent_id: parentId,
         target_display_path: path,
-        target_name: props.renameOnSave ? item.title?.trim() || undefined : undefined,
+        target_name: renameEnabled.value ? item.title?.trim() || undefined : undefined,
       });
       emit("created", [task], target);
       if (task.status === "success") toast.success("分享已转存到你的网盘");
@@ -149,7 +162,7 @@ async function submit() {
       urls: [item.url],
       target_parent_id: parentId,
       target_display_path: path,
-      file_name: props.renameOnSave ? item.title?.trim() || undefined : undefined,
+      file_name: renameEnabled.value ? item.title?.trim() || undefined : undefined,
     });
     emit("created", [task], target);
     if (task.status === "success") toast.success("已离线下载并保存到你的网盘");
@@ -197,7 +210,7 @@ async function submit() {
             {{ chosenCandidate?.reason }} 会保存到下方选择的账号与目录。
           </div>
 
-          <div v-if="renameOnSave && item?.title" class="pansou-save__rename-note">
+          <div v-if="renameEnabled" class="pansou-save__rename-note">
             已开启自动重命名：保存的文件/文件夹将命名为「{{ item.title }}」
           </div>
 

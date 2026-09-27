@@ -9,8 +9,10 @@ import AppModal from "@/components/base/AppModal.vue";
 import ToolCard from "@/components/admin/ToolCard.vue";
 import { copyTextToClipboard, toast } from "@/composables/useToast";
 import {
+  normalizePanSouRenameTargets,
   normalizePanSouTypes,
   PANSOU_CLOUD_TYPES,
+  PANSOU_RENAME_TARGETS,
   pansouPlatformLabel,
   parsePanSouPayload,
   type PanSouItem,
@@ -28,7 +30,7 @@ interface PanSouConfigData {
   password_configured: boolean;
   token_configured: boolean;
   platforms: string[];
-  rename_on_save: boolean;
+  rename_targets: string[];
 }
 
 const cfg = ref<PanSouConfigData>({
@@ -38,7 +40,7 @@ const cfg = ref<PanSouConfigData>({
   password_configured: false,
   token_configured: false,
   platforms: [],
-  rename_on_save: false,
+  rename_targets: [],
 });
 const saving = ref(false);
 const configOpen = ref(false);
@@ -55,6 +57,7 @@ const draft = reactive({
   password: "",
   token: "",
   types: [] as string[],
+  renameTargets: [] as string[],
 });
 
 function matches(title: string) {
@@ -85,12 +88,30 @@ function setAllTypes(checked: boolean) {
   draft.types = checked ? [...PANSOU_CLOUD_TYPES] : [];
 }
 
+function selectedRenameTarget(code: string) {
+  return draft.renameTargets.includes(code);
+}
+
+function toggleRenameTarget(code: string) {
+  const index = draft.renameTargets.indexOf(code);
+  if (index >= 0) {
+    draft.renameTargets.splice(index, 1);
+  } else {
+    draft.renameTargets.push(code);
+  }
+}
+
+function setAllRenameTargets(checked: boolean) {
+  draft.renameTargets = checked ? PANSOU_RENAME_TARGETS.map((t) => t.code) : [];
+}
+
 function fillDraft(next: PanSouConfigData) {
   draft.endpoint = next.endpoint;
   draft.username = next.username;
   draft.password = "";
   draft.token = "";
   draft.types = [...next.platforms];
+  draft.renameTargets = [...next.rename_targets];
 }
 
 async function load() {
@@ -103,7 +124,7 @@ async function load() {
       password_configured: Boolean(d.password_configured),
       token_configured: Boolean(d.token_configured),
       platforms: normalizePanSouTypes(d.platforms),
-      rename_on_save: Boolean(d.rename_on_save),
+      rename_targets: normalizePanSouRenameTargets(d.rename_targets),
     };
   } catch (e) {
     toast.error(getApiErrorMessage(e, "加载 PanSou 设置失败"));
@@ -125,7 +146,7 @@ async function toggleEnabled() {
       endpoint: cfg.value.endpoint,
       username: cfg.value.username,
       platforms: cfg.value.platforms,
-      rename_on_save: cfg.value.rename_on_save,
+      rename_targets: cfg.value.rename_targets,
     });
     cfg.value.enabled = next;
     toast.success(
@@ -161,7 +182,7 @@ async function saveConfig() {
       password: draft.password,
       token: draft.token,
       platforms: draft.types,
-      rename_on_save: cfg.value.rename_on_save,
+      rename_targets: draft.renameTargets,
     });
     await load();
     toast.success("PanSou 配置已保存，前台搜索将使用新的服务与平台范围");
@@ -331,12 +352,27 @@ function openSave(item: PanSouItem) {
           />
         </div>
 
-        <div class="ps-field ps-field--check">
-          <label>
-            <input v-model="cfg.rename_on_save" type="checkbox" />
-            转存时使用 PanSou 标题重命名
+        <div class="ps-field">
+          <label class="ps-field__label-row">
+            <span>转存时使用 PanSou 标题重命名（不选表示全部保持网盘原始名称）</span>
+            <span class="ps-chip-actions">
+              <button type="button" @click="setAllRenameTargets(true)">全选</button>
+              <button type="button" @click="setAllRenameTargets(false)">清空</button>
+            </span>
           </label>
-          <small>适用于单个文件或文件夹（夸克/115 分享转存、115 磁力链接离线下载）；多个顶层项自动跳过，关闭后保持网盘原始名称。</small>
+          <div class="ps-chips">
+            <button
+              v-for="target in PANSOU_RENAME_TARGETS"
+              :key="target.code"
+              type="button"
+              class="ps-chip"
+              :class="{ on: selectedRenameTarget(target.code) }"
+              @click="toggleRenameTarget(target.code)"
+            >
+              {{ target.label }}
+            </button>
+          </div>
+          <small>仅对单个文件/文件夹生效，多个顶层项自动跳过；磁力/电驴链接的重命名目前仅 115 账号支持。</small>
         </div>
 
         <div class="ps-field">
@@ -411,7 +447,7 @@ function openSave(item: PanSouItem) {
       :open="saveOpen"
       :item="saveItem"
       :candidates="saveItem ? saveCandidates(saveItem) : []"
-      :rename-on-save="cfg.rename_on_save"
+      :rename-targets="cfg.rename_targets"
       @close="saveOpen = false"
     />
   </div>
