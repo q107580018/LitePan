@@ -3,6 +3,7 @@ package pan115open
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -126,7 +127,43 @@ func (d *Driver) AddOfflineURLs(ctx context.Context, req driver.OfflineURLReques
 		})
 	}
 	d.recoverExistingOfflineHashes(ctx, results)
+	attachOfflineRenameState(results, urls, req.FileName)
 	return results, nil
+}
+
+// attachOfflineRenameState 为单链接提交携带目标名时，把重命名状态挂到任务结果上，
+// 由 RefreshOfflineTasks 在任务完成后执行；多个链接无法对应单一名称，直接跳过。
+func attachOfflineRenameState(results []driver.OfflineAddResult, urls []string, fileName string) {
+	targetName := strings.TrimSpace(fileName)
+	if targetName == "" || len(urls) != 1 {
+		return
+	}
+	state, _ := json.Marshal(pan115OfflineRenameState{TargetName: targetName})
+	for i := range results {
+		if results[i].Success && strings.TrimSpace(results[i].InfoHash) != "" {
+			results[i].ProviderState = string(state)
+		}
+	}
+}
+
+// pan115OfflineRenameState 是离线下载任务完成后待执行的重命名状态，
+// 序列化后保存在任务的 ProviderState 中。
+type pan115OfflineRenameState struct {
+	TargetName string `json:"target_name"`
+	Attempts   int    `json:"attempts,omitempty"`
+}
+
+// maxOfflineRenameAttempts 自动重命名失败后的最大重试次数；重试期间任务保持进行中，
+// 耗尽后任务仍标记完成但提示重命名失败（文件已入盘）。
+const maxOfflineRenameAttempts = 6
+
+// renameOfflineResult 对离线下载完成后入盘的顶层文件/文件夹重命名。
+func (d *Driver) renameOfflineResult(ctx context.Context, fileID, targetName string) error {
+	id := strings.TrimSpace(fileID)
+	if id == "" {
+		return domain.Errorf(domain.CodeNotFound, "115 离线任务缺少 file_id，无法重命名")
+	}
+	return d.RenameFile(ctx, id, targetName)
 }
 
 // 恢复历史 hash / pick_code 兜底。
@@ -157,7 +194,12 @@ func (d *Driver) recoverExistingOfflineHashes(ctx context.Context, results []dri
 				continue
 			}
 			for _, index := range indexes {
+				// 115 上确实存在该任务（通常为重复提交）：恢复 hash 并标记成功，
+				// 让任务继续被跟踪刷新；顺带使重命名状态可以挂载（重复提交改名场景）。
+				// 已知副作用：若该任务早已完成且用户手动改过名，恢复跟踪后的
+				// 自动重命名会把它覆盖成 PanSou 标题，这是“重复提交改名”的预期结果。
 				results[index].InfoHash = hash
+				results[index].Success = true
 			}
 			delete(wanted, url)
 		}
@@ -168,10 +210,10 @@ func (d *Driver) recoverExistingOfflineHashes(ctx context.Context, results []dri
 }
 
 func (d *Driver) RefreshOfflineTasks(ctx context.Context, refs []driver.OfflineTaskRef) ([]driver.OfflineTaskUpdate, error) {
-	wanted := make(map[string]struct{}, len(refs))
+	wanted := make(map[string]string, len(refs))
 	for _, ref := range refs {
 		if hash := strings.ToLower(strings.TrimSpace(ref.InfoHash)); hash != "" {
-			wanted[hash] = struct{}{}
+			wanted[hash] = ref.ProviderState
 		}
 	}
 	if len(wanted) == 0 {
@@ -187,7 +229,8 @@ func (d *Driver) RefreshOfflineTasks(ctx context.Context, refs []driver.OfflineT
 		}
 		for _, task := range result.Tasks {
 			hash := strings.ToLower(strings.TrimSpace(task.InfoHash))
-			if _, ok := wanted[hash]; !ok {
+			providerState, tracked := wanted[hash]
+			if !tracked {
 				continue
 			}
 			update := driver.OfflineTaskUpdate{
@@ -209,9 +252,31 @@ func (d *Driver) RefreshOfflineTasks(ctx context.Context, refs []driver.OfflineT
 				update.Status = driver.OfflineStatusRunning
 				update.Message = "正在由 115 网盘离线下载"
 			case 2:
+				// 离线下载已成功。若携带了自动重命名状态，把“重命名成功”作为任务完成的前置条件：
+				// 重命名成功才置为完成并回填目标名；暂时失败则保持进行中并携带重试次数，
+				// 由后续轮询继续尝试；耗尽重试后才以提示完成（文件已入盘）。
 				update.Status = driver.OfflineStatusSuccess
 				update.Progress = 100
 				update.Message = "离线下载完成"
+				if providerState != "" {
+					var st pan115OfflineRenameState
+					if err := json.Unmarshal([]byte(providerState), &st); err == nil && strings.TrimSpace(st.TargetName) != "" {
+						if err := d.renameOfflineResult(ctx, task.FileID, st.TargetName); err != nil {
+							if st.Attempts+1 >= maxOfflineRenameAttempts {
+								update.Message += "，但自动重命名失败：" + err.Error()
+							} else {
+								st.Attempts++
+								stateData, _ := json.Marshal(st)
+								update.Status = driver.OfflineStatusRunning
+								update.Progress = 100
+								update.Message = fmt.Sprintf("115 离线下载完成，自动重命名重试中（第 %d/%d 次）", st.Attempts, maxOfflineRenameAttempts)
+								update.ProviderState = string(stateData)
+							}
+						} else {
+							update.Name = st.TargetName
+						}
+					}
+				}
 			default:
 				continue
 			}

@@ -149,6 +149,7 @@ async function submit() {
       urls: [item.url],
       target_parent_id: parentId,
       target_display_path: path,
+      file_name: props.renameOnSave ? item.title?.trim() || undefined : undefined,
     });
     emit("created", [task], target);
     if (task.status === "success") toast.success("已离线下载并保存到你的网盘");
@@ -197,7 +198,7 @@ async function submit() {
           </div>
 
           <div v-if="renameOnSave && item?.title" class="pansou-save__rename-note">
-            已开启自动重命名：保存的{{ chosenCandidate?.mode === "share" ? "文件/文件夹" : "文件" }}将命名为「{{ item.title }}」
+            已开启自动重命名：保存的文件/文件夹将命名为「{{ item.title }}」
           </div>
 
           <section class="pansou-save__target">

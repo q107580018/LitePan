@@ -72,6 +72,7 @@ type OfflineURLRequest struct {
 type OfflineAddResult struct {
 	Source         string
 	ProviderTaskID string
+	ProviderState  string
 	InfoHash       string
 	Name           string
 	Success        bool
