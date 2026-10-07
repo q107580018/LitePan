@@ -5,6 +5,7 @@ import { filesApi } from "@/api/files";
 import type { UploadCrumb } from "@/composables/upload/uploadTaskTypes";
 import { showConfirm } from "@/composables/useConfirm";
 import { toast } from "@/composables/useToast";
+import { promptPansouRename, syncPansouRenameTasks, trackPansouRenameTasks } from "@/utils/pansouRenameConfirm";
 import type { OfflineDownloadCapabilities, OfflineDownloadTask } from "@/types/offline-download";
 
 type Deps = {
@@ -81,12 +82,16 @@ export function useOfflineDownloads(deps: Deps) {
     const byId = new Map(tasks.value.map((task) => [task.task_id, task]));
     for (const task of created) byId.set(task.task_id, task);
     tasks.value = [...byId.values()].sort((a, b) => b.created_at - a.created_at);
+    // PanSou「转存完成后确认重命名」的任务需要跟进到完成后弹窗确认。
+    trackPansouRenameTasks(created);
     ensurePolling();
   }
 
   async function replaceTasks(next: OfflineDownloadTask[]) {
     const before = new Map(tasks.value.map((task) => [task.task_id, task.status]));
     tasks.value = next;
+    trackPansouRenameTasks(next);
+    syncPansouRenameTasks(next);
     const affectsCurrent = next.some(
       (task) =>
         before.get(task.task_id) !== "success" &&
@@ -192,6 +197,7 @@ export function useOfflineDownloads(deps: Deps) {
   }
 
   function statusText(task: OfflineDownloadTask) {
+    if (task.rename_pending && task.status === "success") return "待确认重命名";
     if (task.provider_kind === "builtin") {
       if (task.status === "running" && task.phase === "verifying") return "校验中";
       if (task.status === "running" && task.phase === "handoff") return "准备上传";
@@ -284,6 +290,8 @@ export function useOfflineDownloads(deps: Deps) {
     fetchTasks,
     deleteTasks,
     handlePrimaryAction,
+    /** 对「待确认重命名」的任务重新弹窗确认。 */
+    promptRename: promptPansouRename,
     statusText,
     sourceLabel,
     providerLabel,

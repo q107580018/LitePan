@@ -57,6 +57,12 @@ export interface OfflineDownloadTask {
   message: string;
   error?: string;
   remote_delete: boolean;
+  /** 「转存完成后确认重命名」：为真表示等待用户确认是否改成 PanSou 标题。 */
+  rename_pending?: boolean;
+  /** 待应用的目标名称（PanSou 标题）。 */
+  rename_target?: string;
+  /** 转存后的网盘原始名称。 */
+  rename_origin?: string;
   created_at: number;
   updated_at: number;
 }

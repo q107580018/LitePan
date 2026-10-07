@@ -18,8 +18,8 @@ INSERT INTO offline_download_tasks(
     task_id, account_id, account_name, driver_type, provider_kind, executor_type, source_kind, source, name,
     provider_task_id, provider_state, info_hash, target_parent_id, target_display_path, status,
     phase, progress, size, downloaded_bytes, speed_bytes, local_temp_path, magnet_diagnostics_json,
-    file_id, message, error, remote_delete, created_at, updated_at
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    file_id, message, error, remote_delete, rename_pending, rename_target, rename_origin, created_at, updated_at
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(task_id) DO UPDATE SET
     account_id=excluded.account_id,
     account_name=excluded.account_name,
@@ -46,12 +46,15 @@ ON CONFLICT(task_id) DO UPDATE SET
     message=excluded.message,
     error=excluded.error,
     remote_delete=excluded.remote_delete,
+    rename_pending=excluded.rename_pending,
+    rename_target=excluded.rename_target,
+    rename_origin=excluded.rename_origin,
     created_at=excluded.created_at,
     updated_at=excluded.updated_at`,
 		rec.TaskID, rec.AccountID, rec.AccountName, rec.DriverType, rec.ProviderKind, rec.ExecutorType, rec.SourceKind, rec.Source, rec.Name,
 		rec.ProviderTaskID, rec.ProviderState, rec.InfoHash, rec.TargetParentID, rec.TargetDisplayPath, rec.Status,
 		rec.Phase, rec.Progress, rec.Size, rec.DownloadedBytes, rec.SpeedBytes, rec.LocalTempPath, rec.MagnetDiagnosticsJSON,
-		rec.FileID, rec.Message, rec.Error, rec.RemoteDelete, rec.CreatedAt, rec.UpdatedAt,
+		rec.FileID, rec.Message, rec.Error, rec.RemoteDelete, rec.RenamePending, rec.RenameTarget, rec.RenameOrigin, rec.CreatedAt, rec.UpdatedAt,
 	)
 	return wrapDB(err)
 }
@@ -75,7 +78,7 @@ func (r *offlineDownloadTaskRepo) List(ctx context.Context) ([]*domain.OfflineDo
 SELECT task_id, account_id, account_name, driver_type, provider_kind, executor_type, source_kind, source, name,
        provider_task_id, provider_state, info_hash, target_parent_id, target_display_path, status,
        phase, progress, size, downloaded_bytes, speed_bytes, local_temp_path, magnet_diagnostics_json,
-       file_id, message, error, remote_delete, created_at, updated_at
+       file_id, message, error, remote_delete, rename_pending, rename_target, rename_origin, created_at, updated_at
 FROM offline_download_tasks ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, wrapDB(err)
@@ -98,7 +101,7 @@ func scanOfflineDownloadTask(rows *sql.Rows) (*domain.OfflineDownloadTaskRecord,
 		&rec.TaskID, &rec.AccountID, &rec.AccountName, &rec.DriverType, &rec.ProviderKind, &rec.ExecutorType, &rec.SourceKind, &rec.Source, &rec.Name,
 		&rec.ProviderTaskID, &rec.ProviderState, &rec.InfoHash, &rec.TargetParentID, &rec.TargetDisplayPath, &rec.Status,
 		&rec.Phase, &rec.Progress, &rec.Size, &rec.DownloadedBytes, &rec.SpeedBytes, &rec.LocalTempPath, &rec.MagnetDiagnosticsJSON,
-		&rec.FileID, &rec.Message, &rec.Error, &rec.RemoteDelete, &rec.CreatedAt, &rec.UpdatedAt,
+		&rec.FileID, &rec.Message, &rec.Error, &rec.RemoteDelete, &rec.RenamePending, &rec.RenameTarget, &rec.RenameOrigin, &rec.CreatedAt, &rec.UpdatedAt,
 	)
 	if err != nil {
 		return nil, wrapDB(err)

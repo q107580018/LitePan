@@ -8,6 +8,7 @@ import type { OfflineDownloadTask } from "@/types/offline-download";
 import { renameTargetForCandidate } from "@/utils/pansou";
 import type { PanSouItem } from "@/utils/pansou";
 import type { PanSouSaveCandidate } from "@/utils/pansouSave";
+import { trackPansouRenameTasks } from "@/utils/pansouRenameConfirm";
 import AppModal from "@/components/base/AppModal.vue";
 import AppButton from "@/components/base/AppButton.vue";
 import DriverIcon from "@/components/driver/DriverIcon.vue";
@@ -20,6 +21,8 @@ const props = defineProps<{
   candidates: PanSouSaveCandidate[];
   /** 已开启「转存时使用 PanSou 标题重命名」的范围代号列表。 */
   renameTargets?: string[];
+  /** 「转存完成后确认重命名」：转存先保留原名，完成后弹窗确认是否改名。 */
+  renameConfirm?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -47,6 +50,12 @@ const renameEnabled = computed(
     Boolean(props.item?.title) &&
     renameTarget.value !== "" &&
     (props.renameTargets ?? []).includes(renameTarget.value),
+);
+/** 是否需要等转存完成后弹窗确认：先用网盘原始名称入盘，确认后再改名。 */
+const renameConfirmEnabled = computed(() => renameEnabled.value && Boolean(props.renameConfirm));
+/** 需要重命名时下发的目标名（PanSou 标题）；后端在「完成后确认」模式下会先扣住不用。 */
+const renameTargetName = computed(() =>
+  renameEnabled.value ? props.item?.title?.trim() || undefined : undefined,
 );
 const displayAccount = computed(() => {
   const candidate = chosenCandidate.value;
@@ -130,7 +139,11 @@ async function submit() {
   const target = { accountId, parentId, path };
   // 与离线下载弹窗一致：提交后立刻收起，进度交给任务面板与提示。
   emit("close");
-  toast.info("正在转存，可打开「任务」面板查看进度");
+  toast.info(
+    renameConfirmEnabled.value
+      ? "正在转存，完成后会提示确认是否重命名"
+      : "正在转存，可打开「任务」面板查看进度",
+  );
   try {
     if (candidate.mode === "share") {
       const preparation = await offlineDownloadApi.prepareShare({
@@ -143,15 +156,19 @@ async function submit() {
         toast.error("分享里没有可转存的内容");
         return;
       }
+      // 重命名只支持单个顶层项，多个顶层项时直接按原样保存（由驱动提示跳过）。
+      const deferRename = renameConfirmEnabled.value && fileIds.length === 1;
       const task = await offlineDownloadApi.addShare({
         account_id: accountId,
         preparation_id: preparation.preparation_id,
         file_ids: fileIds,
         target_parent_id: parentId,
         target_display_path: path,
-        target_name: renameEnabled.value ? item.title?.trim() || undefined : undefined,
+        target_name: renameTargetName.value,
+        rename_confirm: deferRename,
       });
       emit("created", [task], target);
+      if (task.rename_pending) trackPansouRenameTasks([task]);
       if (task.status === "success") toast.success("分享已转存到你的网盘");
       else toast.success("转存任务已提交，网盘处理完成后可在任务面板查看");
       return;
@@ -162,9 +179,11 @@ async function submit() {
       urls: [item.url],
       target_parent_id: parentId,
       target_display_path: path,
-      file_name: renameEnabled.value ? item.title?.trim() || undefined : undefined,
+      file_name: renameTargetName.value,
+      rename_confirm: renameConfirmEnabled.value,
     });
     emit("created", [task], target);
+    if (task?.rename_pending) trackPansouRenameTasks([task]);
     if (task.status === "success") toast.success("已离线下载并保存到你的网盘");
     else if (task.status === "failed") toast.warning(task.error || "离线下载任务已失败，请在任务面板查看原因");
     else toast.success("离线下载任务已提交，完成后会自动入盘");
@@ -211,7 +230,10 @@ async function submit() {
           </div>
 
           <div v-if="renameEnabled" class="pansou-save__rename-note">
-            已开启自动重命名：保存的文件/文件夹将命名为「{{ item.title }}」
+            <template v-if="renameConfirmEnabled">
+              转存完成后会弹窗确认是否重命名为「{{ item.title }}」（先保留网盘原始名称）
+            </template>
+            <template v-else>已开启自动重命名：保存的文件/文件夹将命名为「{{ item.title }}」</template>
           </div>
 
           <section class="pansou-save__target">

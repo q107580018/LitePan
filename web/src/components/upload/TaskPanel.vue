@@ -710,6 +710,8 @@ function buildOfflineRow(task: any): PanelRow {
   const badge = getUploadTaskDriverBadge(task);
   const speedText = offline.speedText(task);
   const detailText = offline.detailText(task);
+  // 「转存完成后确认重命名」的任务：尾部操作改成重新弹窗确认，避免误开目录。
+  const renamePending = Boolean(task.rename_pending) && task.status === "success";
   return {
     id: task.task_id,
     kind: "offline",
@@ -725,7 +727,11 @@ function buildOfflineRow(task: any): PanelRow {
     progress: Number(task.progress || 0),
     progressClass: task.status === "failed" ? "error" : "downloading",
     showProgress: ["pending", "running", "retrying"].includes(task.status),
-    actionLabel: task.status === "success" && task.provider_kind !== "builtin" ? "打开" : undefined,
+    actionLabel: renamePending
+      ? "重命名"
+      : task.status === "success" && task.provider_kind !== "builtin"
+        ? "打开"
+        : undefined,
     sortOrder: offlineTaskOrder(task),
     badgeLogo: badge.logo || "",
     badgeName: String(badge.name || "任务").slice(0, 2),
@@ -1169,6 +1175,10 @@ async function handleRowAction(row: PanelRow) {
       return;
     }
     await handleUploadTaskPrimaryAction(task);
+    return;
+  }
+  if (row.kind === "offline" && row.raw?.rename_pending && row.raw?.status === "success") {
+    await offline.promptRename(row.raw);
     return;
   }
   if (row.kind === "offline" && typeof offline.handlePrimaryAction === "function") {

@@ -40,6 +40,7 @@ func (h *Handler) publicSystemConfig(w http.ResponseWriter, r *http.Request) {
 		"index_strm_auto_detect_enabled": h.adminAuth.IndexStrmAutoDetectEnabled(r.Context()),
 		"pansou_enabled":                 h.settings != nil && h.settings.Bool(settings.KeyPanSouEnabled),
 		"pansou_rename_targets":          h.panSouRenameTargets(),
+		"pansou_rename_confirm":          h.panSouRenameConfirm(),
 		// 兼容字段：历史前端读布尔开关，现在以 targets 非空为准。
 		"pansou_rename_on_save": len(h.panSouRenameTargets()) > 0,
 	})

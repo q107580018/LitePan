@@ -230,13 +230,22 @@ func (s *Service) AddShare(ctx context.Context, p AddShareParams) (*Task, error)
 		return nil, err
 	}
 	var result *driver.OfflineShareResult
+	// 「转存完成后确认重命名」：先把目标名留在本地任务上，驱动只负责定位转存后的条目，
+	// 等用户在任务面板里确认（ConfirmRename）后再真正改名。
+	targetName := strings.TrimSpace(p.TargetName)
+	deferRename := p.RenameConfirm && targetName != ""
+	driverTargetName := targetName
+	if deferRename {
+		driverTargetName = ""
+	}
 	err = s.exec.Run(ctx, p.AccountID, func(drv driver.Driver) error {
 		provider, err := driverexec.Require[driver.OfflineShareProvider](drv)
 		if err != nil {
 			return domain.Errorf(domain.CodeNotImplement, "当前网盘不支持分享链接转存")
 		}
 		result, err = provider.SaveOfflineShare(ctx, driver.OfflineShareSaveRequest{
-			Preparation: prepared.value, FileIDs: fileIDs, ParentID: p.TargetParentID, TargetName: p.TargetName,
+			Preparation: prepared.value, FileIDs: fileIDs, ParentID: p.TargetParentID,
+			TargetName: driverTargetName, DeferRename: deferRename,
 		})
 		return err
 	})
@@ -265,6 +274,11 @@ func (s *Service) AddShare(ctx context.Context, p AddShareParams) (*Task, error)
 		Status: status, Phase: phase, Progress: progress, Size: result.Size,
 		ProviderTaskID: result.ProviderTaskID, ProviderState: result.ProviderState, FileID: result.FileID, Message: strutil.FirstNonEmpty(strings.TrimSpace(result.Message), "分享链接转存完成"),
 		CreatedAt: timeutil.UnixFloat(now), UpdatedAt: timeutil.UnixFloat(now),
+	}
+	if result.RenameDeferred {
+		task.RenamePending = true
+		task.RenameTarget = targetName
+		task.RenameOrigin = task.Name
 	}
 	s.putTask(task)
 	if task.Status == driver.OfflineStatusSuccess {
@@ -298,6 +312,12 @@ func (s *Service) AddURLs(ctx context.Context, p AddURLParams) ([]Task, error) {
 	if err != nil {
 		return nil, err
 	}
+	// 「转存完成后确认重命名」：文件名不下发驱动，等任务完成后由用户确认。
+	fileName := strings.TrimSpace(p.FileName)
+	deferRename := p.RenameConfirm && fileName != "" && len(urls) == 1
+	if deferRename {
+		fileName = ""
+	}
 	var results []driver.OfflineAddResult
 	var cap driver.OfflineDownloadCapabilities
 	err = s.exec.Run(ctx, p.AccountID, func(drv driver.Driver) error {
@@ -324,7 +344,7 @@ func (s *Service) AddURLs(ctx context.Context, p AddURLParams) ([]Task, error) {
 		got, err := d.AddOfflineURLs(ctx, driver.OfflineURLRequest{
 			URLs:     urls,
 			ParentID: p.TargetParentID,
-			FileName: strings.TrimSpace(p.FileName),
+			FileName: fileName,
 		})
 		if err != nil {
 			return err
@@ -380,10 +400,128 @@ func (s *Service) AddURLs(ctx context.Context, p AddURLParams) ([]Task, error) {
 			CreatedAt:         timeutil.UnixFloat(now),
 			UpdatedAt:         timeutil.UnixFloat(now),
 		}
+		// 单链接的待确认重命名：任务名在下载完成后会被驱动刷新为网盘上的真实名称。
+		if deferRename && len(results) == 1 && result.Success {
+			task.RenamePending = true
+			task.RenameTarget = strings.TrimSpace(p.FileName)
+			task.RenameOrigin = task.Name
+		}
 		s.putTask(&task)
 		created = append(created, task)
 	}
 	return created, nil
+}
+
+// ConfirmRename 处理「转存完成后确认重命名」：apply=false 保留网盘原始名称，apply=true 改成 PanSou 标题。
+// 待确认状态保存在任务本体上（并随任务持久化），因此刷新页面或重启服务后仍可继续确认。
+func (s *Service) ConfirmRename(ctx context.Context, taskID string, apply bool) (*Task, error) {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return nil, domain.Errorf(domain.CodeValidation, "缺少任务 ID")
+	}
+	s.mu.Lock()
+	current, ok := s.tasks[taskID]
+	var task Task
+	if ok {
+		task = *current
+	}
+	s.mu.Unlock()
+	if !ok {
+		return nil, domain.Errorf(domain.CodeNotFound, "离线下载任务不存在")
+	}
+	if !task.RenamePending {
+		return nil, domain.Errorf(domain.CodeValidation, "该任务没有待确认的重命名")
+	}
+	if task.Status != driver.OfflineStatusSuccess {
+		// 任务尚未完成（或已失败）时没有稳定的改名对象，等完成后再确认。
+		return nil, domain.Errorf(domain.CodeValidation, "任务尚未完成，暂时无法确认重命名")
+	}
+	target := strings.TrimSpace(task.RenameTarget)
+	if !apply {
+		return s.finishRename(taskID, "", "已保留网盘原始名称")
+	}
+	if target == "" {
+		return nil, domain.Errorf(domain.CodeValidation, "该任务没有待确认的重命名")
+	}
+	fileID, err := s.renameTargetFileID(ctx, &task)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.exec.Run(ctx, task.AccountID, func(drv driver.Driver) error {
+		renamer, err := driverexec.Require[driver.Renamer](drv)
+		if err != nil {
+			return domain.Errorf(domain.CodeNotImplement, "当前网盘不支持重命名")
+		}
+		return renamer.RenameFile(ctx, fileID, target)
+	}); err != nil {
+		return nil, err
+	}
+	return s.finishRename(taskID, target, "已重命名为「"+target+"」")
+}
+
+// renameTargetFileID 返回需要改名的远端条目 ID：优先用驱动回填的 file_id，
+// 缺失时按名称在目标目录里查找（115 分享转存等同步接口可能未能回填）。
+// 名称优先用任务当前名：分享转存后任务名就是网盘原始名；URL 离线下载的任务名
+// 在完成后会被驱动刷新为网盘上的真实名称，而 RenameOrigin 是创建时从链接猜的，可能过期。
+func (s *Service) renameTargetFileID(ctx context.Context, task *Task) (string, error) {
+	if id := strings.TrimSpace(task.FileID); id != "" {
+		return id, nil
+	}
+	name := strutil.FirstNonEmpty(strings.TrimSpace(task.Name), strings.TrimSpace(task.RenameOrigin))
+	if name == "" {
+		return "", domain.Errorf(domain.CodeDriverError, "无法定位转存后的文件，请在文件列表中手动重命名")
+	}
+	var fileID string
+	err := s.exec.Run(ctx, task.AccountID, func(drv driver.Driver) error {
+		lister, err := driverexec.Require[driver.Lister](drv)
+		if err != nil {
+			return err
+		}
+		items, err := lister.ListFiles(ctx, task.TargetParentID)
+		if err != nil {
+			return err
+		}
+		for _, item := range items {
+			if strings.TrimSpace(item.Name) == name {
+				fileID = item.ID
+				return nil
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return "", domain.Errorf(domain.CodeDriverError, "定位转存后的文件失败：%s", err.Error())
+	}
+	if fileID == "" {
+		return "", domain.Errorf(domain.CodeNotFound, "未找到转存后的文件「%s」，请在文件列表中手动重命名", name)
+	}
+	return fileID, nil
+}
+
+// finishRename 写入重命名的终态；target 为空表示保持原名。
+func (s *Service) finishRename(taskID, target, message string) (*Task, error) {
+	s.mu.Lock()
+	current, ok := s.tasks[taskID]
+	var next Task
+	if ok {
+		next = *current
+	}
+	s.mu.Unlock()
+	if !ok {
+		return nil, domain.Errorf(domain.CodeNotFound, "离线下载任务不存在")
+	}
+	next.RenamePending = false
+	next.RenameTarget = ""
+	if target != "" {
+		next.Name = target
+	}
+	if message != "" {
+		next.Message = message
+	}
+	next.UpdatedAt = timeutil.UnixFloat(time.Now())
+	s.putTask(&next)
+	copy := next
+	return &copy, nil
 }
 
 func (s *Service) PrepareTorrent(ctx context.Context, accountID int64, localPath, fileName string) (*TorrentPreparation, error) {
@@ -727,6 +865,11 @@ func (s *Service) applyUpdates(accountID int64, updates []driver.OfflineTaskUpda
 			// 任务进入终态后不再被刷新，重命名等驱动侧状态一并清空，
 			// 避免完成后的任务永久携带残留状态。
 			task.ProviderState = ""
+		}
+		if task.Status == driver.OfflineStatusFailed {
+			// 转存失败就没有可重命名的对象，直接丢掉待确认状态。
+			task.RenamePending = false
+			task.RenameTarget = ""
 		}
 		task.Error = update.Error
 		task.UpdatedAt = timeutil.UnixFloat(time.Now())
@@ -1091,6 +1234,7 @@ func recordFromTask(task *Task) *domain.OfflineDownloadTaskRecord {
 		DownloadedBytes: task.DownloadedBytes, SpeedBytes: task.SpeedBytes, LocalTempPath: task.LocalTempPath, MagnetDiagnosticsJSON: diagnosticsJSON,
 		FileID:  task.FileID,
 		Message: task.Message, Error: task.Error, RemoteDelete: task.RemoteDelete,
+		RenamePending: task.RenamePending, RenameTarget: task.RenameTarget, RenameOrigin: task.RenameOrigin,
 		CreatedAt: task.CreatedAt, UpdatedAt: task.UpdatedAt,
 	}
 }
@@ -1111,6 +1255,7 @@ func taskFromRecord(rec *domain.OfflineDownloadTaskRecord) *Task {
 		DownloadedBytes: rec.DownloadedBytes, SpeedBytes: rec.SpeedBytes, LocalTempPath: rec.LocalTempPath, MagnetDiagnostics: diagnostics,
 		FileID:  rec.FileID,
 		Message: rec.Message, Error: rec.Error, RemoteDelete: rec.RemoteDelete,
+		RenamePending: rec.RenamePending, RenameTarget: rec.RenameTarget, RenameOrigin: rec.RenameOrigin,
 		CreatedAt: rec.CreatedAt, UpdatedAt: rec.UpdatedAt,
 	}
 }

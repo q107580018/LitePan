@@ -63,6 +63,9 @@ type quarkRenameState struct {
 	OriginalName string   `json:"original_name"`
 	ExistingIDs  []string `json:"existing_ids"`
 	Attempts     int      `json:"attempts"`
+	// Pending 为真表示目标名等待用户确认（转存完成后弹窗确认），
+	// 轮询只负责定位转存后的文件，不自动改名。
+	Pending bool `json:"pending,omitempty"`
 }
 
 // maxShareRenameAttempts 自动重命名失败后的最大重试次数；重试期间任务保持进行中，
@@ -156,7 +159,10 @@ func (d *Driver) SaveOfflineShare(ctx context.Context, req driver.OfflineShareSa
 		for _, item := range before {
 			ids = append(ids, item.ID)
 		}
-		renameState = quarkRenameState{ParentID: req.ParentID, TargetName: targetName, OriginalName: entries[0].FileName, ExistingIDs: ids}
+		renameState = quarkRenameState{ParentID: req.ParentID, TargetName: targetName, OriginalName: entries[0].FileName, ExistingIDs: ids, Pending: req.DeferRename}
+		if renameState.Pending {
+			renameNote = "；已保留网盘原始名称，等待确认重命名"
+		}
 		data, _ := json.Marshal(renameState)
 		renameStateData = string(data)
 	}
@@ -173,7 +179,8 @@ func (d *Driver) SaveOfflineShare(ctx context.Context, req driver.OfflineShareSa
 		message = "夸克分享转存任务已提交" + renameNote
 	}
 	result := &driver.OfflineShareResult{Name: shareResultName(entries), Size: size, ProviderTaskID: saved.TaskID, ProviderState: renameStateData, Completed: completed, Message: message}
-	if completed && renameStateData != "" {
+	result.RenameDeferred = renameState.Pending
+	if completed && renameStateData != "" && !renameState.Pending {
 		if err := d.renameSavedShare(ctx, renameState); err != nil {
 			result.Message += "，但自动重命名失败：" + err.Error()
 		}
@@ -207,7 +214,27 @@ func (d *Driver) RefreshOfflineTasks(ctx context.Context, refs []driver.OfflineT
 			if ref.ProviderState != "" {
 				var st quarkRenameState
 				if err := json.Unmarshal([]byte(ref.ProviderState), &st); err == nil && strings.TrimSpace(st.TargetName) != "" {
-					if err := d.renameSavedShare(ctx, st); err != nil {
+					if st.Pending {
+						// 目标名等待用户确认：这里只定位转存后的文件，确认后由公共层改名。
+						// 定位失败时保持任务进行中并重试（代价低），耗尽后按完成处理，
+						// 确认重命名时公共层还会再按原始名称在目标目录里找一次。
+						id, err := d.findSavedShareID(ctx, st)
+						switch {
+						case err == nil:
+							update.FileID = id
+							update.Name = st.OriginalName
+							update.Message = "夸克分享链接转存完成；已保留网盘原始名称，等待确认重命名"
+						case st.Attempts+1 >= maxShareRenameAttempts:
+							update.Message = "夸克分享链接转存完成；已保留网盘原始名称，等待确认重命名"
+						default:
+							st.Attempts++
+							stateData, _ := json.Marshal(st)
+							update.Status = driver.OfflineStatusRunning
+							update.Progress = 100
+							update.Message = fmt.Sprintf("夸克分享内容已转存，正在定位文件（第 %d/%d 次）", st.Attempts, maxShareRenameAttempts)
+							update.ProviderState = string(stateData)
+						}
+					} else if err := d.renameSavedShare(ctx, st); err != nil {
 						if st.Attempts+1 >= maxShareRenameAttempts {
 							update.Message += "，但自动重命名失败：" + err.Error()
 						} else {
@@ -233,10 +260,20 @@ func (d *Driver) RefreshOfflineTasks(ctx context.Context, refs []driver.OfflineT
 	return updates, nil
 }
 
+// renameSavedShare 在目标目录里找到本次转存新增的顶层项并改名为目标名。
 func (d *Driver) renameSavedShare(ctx context.Context, state quarkRenameState) error {
-	items, err := d.ListFiles(ctx, state.ParentID)
+	id, err := d.findSavedShareID(ctx, state)
 	if err != nil {
 		return err
+	}
+	return d.RenameFile(ctx, id, state.TargetName)
+}
+
+// findSavedShareID 定位本次转存新增的顶层项（跳过转存前已存在的 id）。
+func (d *Driver) findSavedShareID(ctx context.Context, state quarkRenameState) (string, error) {
+	items, err := d.ListFiles(ctx, state.ParentID)
+	if err != nil {
+		return "", err
 	}
 	for _, item := range items {
 		for _, id := range state.ExistingIDs {
@@ -245,11 +282,11 @@ func (d *Driver) renameSavedShare(ctx context.Context, state quarkRenameState) e
 			}
 		}
 		if item.Name == state.OriginalName {
-			return d.RenameFile(ctx, item.ID, state.TargetName)
+			return item.ID, nil
 		}
 	next:
 	}
-	return domain.Errorf(domain.CodeNotFound, "未找到转存后的文件")
+	return "", domain.Errorf(domain.CodeNotFound, "未找到转存后的文件")
 }
 
 func (d *Driver) listSharedRoot(ctx context.Context, pwdID, stoken string) ([]shareEntry, error) {

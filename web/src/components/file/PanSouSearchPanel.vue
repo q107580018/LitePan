@@ -42,6 +42,7 @@ interface PlatformGroup {
 
 const enabled = ref(false);
 const renameTargets = ref<string[]>([]);
+const renameConfirm = ref(false);
 const q = ref("");
 const loading = ref(false);
 const searchTakingLong = ref(false);
@@ -55,6 +56,7 @@ onMounted(async () => {
     const cfg: any = await http.get("/public/system-config");
     enabled.value = Boolean((cfg as any)?.pansou_enabled);
     renameTargets.value = normalizePanSouRenameTargets((cfg as any)?.pansou_rename_targets);
+    renameConfirm.value = Boolean((cfg as any)?.pansou_rename_confirm);
   } catch {
     /* 首页其他功能不受影响 */
   }
@@ -223,6 +225,7 @@ async function openSave(item: PanSouItem) {
   try {
     const cfg: any = await http.get("/public/system-config");
     renameTargets.value = normalizePanSouRenameTargets((cfg as any)?.pansou_rename_targets);
+    renameConfirm.value = Boolean((cfg as any)?.pansou_rename_confirm);
   } catch {
     /* 忽略：沿用当前值 */
   }
@@ -453,6 +456,7 @@ async function copyPassword(item: PanSouItem) {
     :item="saveItem"
     :candidates="saveItem ? candidatesFor(saveItem) : []"
     :rename-targets="renameTargets"
+    :rename-confirm="renameConfirm"
     @close="saveOpen = false"
     @created="onSaveCreated"
   />

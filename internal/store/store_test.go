@@ -211,3 +211,45 @@ func TestConfigKV(t *testing.T) {
 		t.Fatalf("all mismatch: %+v", all)
 	}
 }
+
+func TestOfflineDownloadTaskRenameFieldsRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	rec := &domain.OfflineDownloadTaskRecord{
+		TaskID: "task-1", AccountID: 7, AccountName: "测试盘", DriverType: "115_open",
+		ProviderKind: "native", SourceKind: "share", Source: "https://115.com/s/abc",
+		Name: "电影.mkv", TargetParentID: "folder-1", TargetDisplayPath: "/影视",
+		Status: "success", Progress: 100, FileID: "file-9", Message: "已保留网盘原始名称，等待确认重命名",
+		RenamePending: true, RenameTarget: "PanSou 标题", RenameOrigin: "电影.mkv",
+		CreatedAt: 1, UpdatedAt: 2,
+	}
+	if err := s.OfflineDownloads.Upsert(ctx, rec); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	rows, err := s.OfflineDownloads.List(ctx)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("want 1 row, got %d", len(rows))
+	}
+	got := rows[0]
+	if !got.RenamePending || got.RenameTarget != "PanSou 标题" || got.RenameOrigin != "电影.mkv" {
+		t.Fatalf("待确认重命名字段未正确落库: %+v", got)
+	}
+
+	rec.RenamePending = false
+	rec.RenameTarget = ""
+	rec.Name = "PanSou 标题"
+	if err := s.OfflineDownloads.Upsert(ctx, rec); err != nil {
+		t.Fatalf("upsert again: %v", err)
+	}
+	rows, err = s.OfflineDownloads.List(ctx)
+	if err != nil {
+		t.Fatalf("list again: %v", err)
+	}
+	if rows[0].RenamePending || rows[0].RenameTarget != "" || rows[0].Name != "PanSou 标题" {
+		t.Fatalf("确认后的更新未生效: %+v", rows[0])
+	}
+}

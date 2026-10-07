@@ -525,6 +525,7 @@ func NewRouter(d Deps) http.Handler {
 					r.Post("/torrent", h.addOfflineTorrent)
 					r.Get("/tasks", h.listOfflineDownloadTasks)
 					r.Post("/tasks/refresh", h.refreshOfflineDownloadTasks)
+					r.Post("/tasks/{taskID}/rename", h.confirmOfflineRename)
 					r.Post("/tasks/batch-delete", h.batchDeleteOfflineDownloadTasks)
 					r.Delete("/tasks/{taskID}", h.deleteOfflineDownloadTask)
 				})

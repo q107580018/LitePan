@@ -19,6 +19,8 @@ type addOfflineURLsReq struct {
 	FileName          string   `json:"file_name"`
 	TargetParentID    string   `json:"target_parent_id"`
 	TargetDisplayPath string   `json:"target_display_path"`
+	// RenameConfirm 为真时不直接改名，等任务完成后由用户确认。
+	RenameConfirm bool `json:"rename_confirm"`
 }
 
 type prepareOfflineShareReq struct {
@@ -34,6 +36,12 @@ type addOfflineShareReq struct {
 	TargetParentID    string   `json:"target_parent_id"`
 	TargetDisplayPath string   `json:"target_display_path"`
 	TargetName        string   `json:"target_name"`
+	// RenameConfirm 为真时不直接改名，等任务完成后由用户确认。
+	RenameConfirm bool `json:"rename_confirm"`
+}
+
+type confirmOfflineRenameReq struct {
+	Apply bool `json:"apply"`
 }
 
 type addOfflineTorrentReq struct {
@@ -78,6 +86,7 @@ func (h *Handler) addOfflineURLs(w http.ResponseWriter, r *http.Request) {
 		FileName:          req.FileName,
 		TargetParentID:    req.TargetParentID,
 		TargetDisplayPath: req.TargetDisplayPath,
+		RenameConfirm:     req.RenameConfirm,
 	})
 	if err != nil {
 		writeErr(w, err)
@@ -111,12 +120,33 @@ func (h *Handler) addOfflineShare(w http.ResponseWriter, r *http.Request) {
 	task, err := h.offlineDownloads.AddShare(r.Context(), offlinedownload.AddShareParams{
 		AccountID: req.AccountID, PreparationID: req.PreparationID, FileIDs: req.FileIDs,
 		TargetParentID: req.TargetParentID, TargetDisplayPath: req.TargetDisplayPath, TargetName: req.TargetName,
+		RenameConfirm: req.RenameConfirm,
 	})
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, Resp{Success: true, Message: "分享链接转存完成", Data: task})
+}
+
+// confirmOfflineRename 处理「转存完成后确认重命名」：apply=false 保留网盘原名，true 改成 PanSou 标题。
+func (h *Handler) confirmOfflineRename(w http.ResponseWriter, r *http.Request) {
+	var req confirmOfflineRenameReq
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, err)
+		return
+	}
+	taskID := chi.URLParam(r, "taskID")
+	task, err := h.offlineDownloads.ConfirmRename(r.Context(), taskID, req.Apply)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	message := "已保留网盘原始名称"
+	if req.Apply {
+		message = "重命名完成"
+	}
+	writeJSON(w, http.StatusOK, Resp{Success: true, Message: message, Data: task})
 }
 
 func (h *Handler) prepareOfflineTorrent(w http.ResponseWriter, r *http.Request) {

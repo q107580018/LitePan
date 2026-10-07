@@ -377,3 +377,104 @@ func Test115ShareRenameRejectedIsNotRetried(t *testing.T) {
 		t.Fatalf("重命名失败时应保留原名: %+v", result)
 	}
 }
+
+func Test115ShareSaveDefersRenameWhenConfirmRequired(t *testing.T) {
+	renameCalls := 0
+	listCalls := 0
+	d := &Driver{
+		add: Addition{ShareCookie: "UID=test-cookie"},
+		client: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			switch req.URL.Path {
+			case "/share/snap":
+				return jsonResponse(`{"state":true,"data":{"list":[{"fid":"file-1","cid":"parent-1","fc":"1","n":"a.mkv","s":"100"}]}}`), nil
+			case "/open/ufile/files":
+				listCalls++
+				if listCalls == 1 {
+					return jsonResponse(`{"state":true,"count":0,"data":[]}`), nil
+				}
+				return jsonResponse(`{"state":true,"count":1,"data":[{"fid":"new-1","file_name":"a.mkv","file_category":"1"}]}`), nil
+			case "/share/receive":
+				return jsonResponse(`{"state":true,"data":{}}`), nil
+			case "/open/ufile/update":
+				renameCalls++
+				return jsonResponse(`{"state":true}`), nil
+			default:
+				t.Fatalf("unexpected 115 request: %s", req.URL.String())
+				return nil, nil
+			}
+		})},
+	}
+	preparation, err := d.PrepareOfflineShare(context.Background(), driver.OfflineSharePrepareRequest{
+		Link: "https://115.com/s/abc123", Passcode: "7788",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := d.SaveOfflineShare(context.Background(), driver.OfflineShareSaveRequest{
+		Preparation: *preparation, FileIDs: []string{"file-1"}, ParentID: "target-1",
+		TargetName: "PanSou 标题", DeferRename: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Completed || !result.RenameDeferred {
+		t.Fatalf("115 延迟重命名应同步完成并回执待确认: %+v", result)
+	}
+	if result.FileID != "new-1" || result.Name != "a.mkv" {
+		t.Fatalf("延迟重命名应回填新增项 id 与原始名称: %+v", result)
+	}
+	if !strings.Contains(result.Message, "等待确认重命名") {
+		t.Fatalf("延迟重命名应在结果里说明: %+v", result)
+	}
+	if renameCalls != 0 {
+		t.Fatalf("延迟重命名阶段不应调用改名接口，实际 %d 次", renameCalls)
+	}
+}
+
+func Test115ShareSaveDefersRenameStillPendingWhenLookupFails(t *testing.T) {
+	listCalls := 0
+	d := &Driver{
+		add: Addition{ShareCookie: "UID=test-cookie"},
+		client: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			switch req.URL.Path {
+			case "/share/snap":
+				return jsonResponse(`{"state":true,"data":{"list":[{"fid":"file-1","cid":"parent-1","fc":"1","n":"a.mkv","s":"100"}]}}`), nil
+			case "/open/ufile/files":
+				listCalls++
+				// 转存前后目录始终为空：定位新增项始终失败。
+				return jsonResponse(`{"state":true,"count":0,"data":[]}`), nil
+			case "/share/receive":
+				return jsonResponse(`{"state":true,"data":{}}`), nil
+			default:
+				t.Fatalf("unexpected 115 request: %s", req.URL.String())
+				return nil, nil
+			}
+		})},
+	}
+	preparation, err := d.PrepareOfflineShare(context.Background(), driver.OfflineSharePrepareRequest{
+		Link: "https://115.com/s/abc123", Passcode: "7788",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := d.SaveOfflineShare(context.Background(), driver.OfflineShareSaveRequest{
+		Preparation: *preparation, FileIDs: []string{"file-1"}, ParentID: "target-1",
+		TargetName: "PanSou 标题", DeferRename: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 定位失败也必须回执待确认：否则任务不会挂上 RenamePending，用户永远收不到确认弹窗。
+	if !result.RenameDeferred {
+		t.Fatalf("定位失败时应保持待确认状态，由确认时兑底查找: %+v", result)
+	}
+	if result.FileID != "" {
+		t.Fatalf("定位失败时不应回填 file_id: %+v", result)
+	}
+	if !strings.Contains(result.Message, "未能定位转存后的文件") {
+		t.Fatalf("定位失败应在结果里说明: %+v", result)
+	}
+	if listCalls != maxShareRenameLookups+1 {
+		t.Fatalf("应重试查找 %d 次（含转存前 1 次），实际 %d 次", maxShareRenameLookups, listCalls)
+	}
+}

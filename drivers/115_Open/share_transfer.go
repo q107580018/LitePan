@@ -180,7 +180,20 @@ func (d *Driver) SaveOfflineShare(ctx context.Context, req driver.OfflineShareSa
 		Name: name115ShareResult(entries), Size: size, Completed: true,
 		Message: "115 分享链接转存完成" + renameNote,
 	}
-	if wantRename {
+	switch {
+	case !wantRename:
+	case req.DeferRename:
+		// 「转存完成后确认重命名」：只定位新增项，不改名，等用户确认后再改。
+		// 定位失败也保持待确认状态：确认时公共层会按原始名称在目标目录里再找一次。
+		newID, err := d.findSaved115ShareIDWithRetry(ctx, req.ParentID, existingIDs, entries[0].Name)
+		if err != nil {
+			result.Message += "；未能定位转存后的文件，确认重命名时将在文件列表中查找"
+		} else {
+			result.FileID = newID
+			result.Message += "；已保留网盘原始名称，等待确认重命名"
+		}
+		result.RenameDeferred = true
+	default:
 		if err := d.renameSaved115Share(ctx, req.ParentID, existingIDs, entries[0].Name, targetName); err != nil {
 			result.Message += "，但自动重命名失败：" + err.Error()
 		} else {
@@ -195,13 +208,23 @@ func (d *Driver) SaveOfflineShare(ctx context.Context, req driver.OfflineShareSa
 // 因此对“查找新增项”做短间隔重试；找到后的 RenameFile 被拒（如目标名非法）
 // 多为永久性错误，不重试直接返回。
 func (d *Driver) renameSaved115Share(ctx context.Context, parentID string, existingIDs []string, originalName, targetName string) error {
+	newID, err := d.findSaved115ShareIDWithRetry(ctx, parentID, existingIDs, originalName)
+	if err != nil {
+		return err
+	}
+	return d.RenameFile(ctx, newID, targetName)
+}
+
+// findSaved115ShareIDWithRetry 在“查找新增项”上做短间隔重试：
+// 115 的 /share/receive 虽为同步接口，但文件在目标目录可见可能短暂延迟。
+func (d *Driver) findSaved115ShareIDWithRetry(ctx context.Context, parentID string, existingIDs []string, originalName string) (string, error) {
 	var lastErr error
 	for attempt := 0; attempt < maxShareRenameLookups; attempt++ {
 		if attempt > 0 {
 			select {
 			case <-time.After(shareRenameLookupInterval):
 			case <-ctx.Done():
-				return ctx.Err()
+				return "", ctx.Err()
 			}
 		}
 		newID, err := d.findSaved115ShareID(ctx, parentID, existingIDs, originalName)
@@ -209,9 +232,9 @@ func (d *Driver) renameSaved115Share(ctx context.Context, parentID string, exist
 			lastErr = err
 			continue
 		}
-		return d.RenameFile(ctx, newID, targetName)
+		return newID, nil
 	}
-	return lastErr
+	return "", lastErr
 }
 
 func (d *Driver) findSaved115ShareID(ctx context.Context, parentID string, existingIDs []string, originalName string) (string, error) {

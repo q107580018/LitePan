@@ -30,8 +30,12 @@ type OfflineDownloadTaskRecord struct {
 	Message               string
 	Error                 string
 	RemoteDelete          bool
-	CreatedAt             float64
-	UpdatedAt             float64
+	// RenamePending / RenameTarget / RenameOrigin 承载「转存完成后确认重命名」的待确认状态。
+	RenamePending bool
+	RenameTarget  string
+	RenameOrigin  string
+	CreatedAt     float64
+	UpdatedAt     float64
 }
 
 type OfflineDownloadTaskRepository interface {

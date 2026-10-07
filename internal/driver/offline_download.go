@@ -42,6 +42,9 @@ type OfflineShareSaveRequest struct {
 	FileIDs     []string
 	ParentID    string
 	TargetName  string
+	// DeferRename 为真时驱动只定位转存后的条目、不执行重命名，
+	// 改名交给用户在转存完成后确认（结果用 RenameDeferred 回执）。
+	DeferRename bool
 }
 
 // OfflineShareResult 描述已转存到目标网盘的顶层内容。
@@ -53,6 +56,8 @@ type OfflineShareResult struct {
 	ProviderState  string
 	Completed      bool
 	Message        string
+	// RenameDeferred 表示本次转存保留了网盘原始名称，重命名等待用户确认。
+	RenameDeferred bool
 }
 
 // OfflineShareProvider 由支持分享链接预解析和转存的驱动实现。

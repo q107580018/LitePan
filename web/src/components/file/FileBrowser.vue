@@ -23,6 +23,11 @@ import { useStrmDirectoryPrompt } from "@/composables/useStrmDirectoryPrompt";
 import { useHomeFooterStatus } from "@/composables/useHomeFooterStatus";
 import { fileKind } from "@/utils/fileIcon";
 import { publicApi } from "@/api/public";
+import {
+  PANSOU_RENAME_EVENT,
+  stopPansouRenameWatch,
+  type PansouRenameEventDetail,
+} from "@/utils/pansouRenameConfirm";
 import AccountSelector from "./AccountSelector.vue";
 import FloatingAccountSwitcher from "./FloatingAccountSwitcher.vue";
 import BreadcrumbNav from "./BreadcrumbNav.vue";
@@ -704,6 +709,15 @@ function handlePansouSaveCreated(
   }
 }
 
+/** 「转存完成后确认重命名」改名成功：正在浏览目标目录时刷新列表。 */
+function handlePansouRenamed(event: Event) {
+  const detail = (event as CustomEvent<PansouRenameEventDetail>).detail;
+  if (!detail) return;
+  if (Number(detail.accountId) !== currentAccountId.value) return;
+  if (String(detail.parentId || "") !== String(currentParentId.value || "")) return;
+  void store.loadFiles({ forceRefresh: true, silent: true });
+}
+
 const initialLocation = !hasPendingBrowserLocationReset() ? loadSavedBrowserLocation() : null;
 if (initialLocation) {
   store.primeLocation(initialLocation.accountId, initialLocation.crumbs);
@@ -981,6 +995,7 @@ watch(browseAccessMode, async (mode, prevMode) => {
 });
 
 onMounted(async () => {
+  window.addEventListener(PANSOU_RENAME_EVENT, handlePansouRenamed);
   // 守卫进入首页时已拉取过认证状态，有缓存则跳过，避免重复的 /auth/status 往返。
   if (!auth.loaded) await auth.load();
   // 公共系统配置只影响账号切换 UI 与 STRM 提示，不在文件首屏关键路径上，后台并行拉取。
@@ -1014,6 +1029,8 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  window.removeEventListener(PANSOU_RENAME_EVENT, handlePansouRenamed);
+  stopPansouRenameWatch();
   stopDragUnlock();
   clearNameAlignApplyProgress();
   uploadApi.cleanupUploadTasks();

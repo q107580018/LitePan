@@ -15,6 +15,8 @@ export interface AddOfflineURLsPayload {
   file_name?: string;
   target_parent_id: string;
   target_display_path: string;
+  /** 为真时不直接改名，等任务完成后由用户确认。 */
+  rename_confirm?: boolean;
 }
 
 export interface PrepareOfflineSharePayload {
@@ -30,6 +32,8 @@ export interface AddOfflineSharePayload {
   target_parent_id: string;
   target_display_path: string;
   target_name?: string;
+  /** 为真时不直接改名，等任务完成后由用户确认。 */
+  rename_confirm?: boolean;
 }
 
 export interface AddOfflineTorrentPayload {
@@ -99,5 +103,13 @@ export const offlineDownloadApi = {
     return http.post<OfflineBatchDeleteResult>("/files/offline-download/tasks/batch-delete", {
       task_ids: taskIds,
     });
+  },
+
+  /** 「转存完成后确认重命名」：apply=true 改成 PanSou 标题，false 保留网盘原始名称。 */
+  confirmRename(taskId: string, apply: boolean) {
+    return http.post<OfflineDownloadTask>(
+      `/files/offline-download/tasks/${encodeURIComponent(taskId)}/rename`,
+      { apply },
+    );
   },
 };

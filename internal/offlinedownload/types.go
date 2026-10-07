@@ -83,8 +83,13 @@ type Task struct {
 	Message           string             `json:"message"`
 	Error             string             `json:"error,omitempty"`
 	RemoteDelete      bool               `json:"remote_delete"`
-	CreatedAt         float64            `json:"created_at"`
-	UpdatedAt         float64            `json:"updated_at"`
+	// RenamePending 为真表示「转存完成后确认重命名」尚未确认：
+	// RenameTarget 是待应用的 PanSou 标题，RenameOrigin 是转存后的网盘原始名称。
+	RenamePending bool    `json:"rename_pending,omitempty"`
+	RenameTarget  string  `json:"rename_target,omitempty"`
+	RenameOrigin  string  `json:"rename_origin,omitempty"`
+	CreatedAt     float64 `json:"created_at"`
+	UpdatedAt     float64 `json:"updated_at"`
 }
 
 type AddURLParams struct {
@@ -94,6 +99,8 @@ type AddURLParams struct {
 	FileName          string
 	TargetParentID    string
 	TargetDisplayPath string
+	// RenameConfirm 为真时不直接把 FileName 下发给驱动，而是等任务完成后由用户确认是否改名。
+	RenameConfirm bool
 }
 
 type TorrentPreparation struct {
@@ -134,6 +141,8 @@ type AddShareParams struct {
 	TargetParentID    string
 	TargetDisplayPath string
 	TargetName        string
+	// RenameConfirm 为真时不直接把 TargetName 下发给驱动，而是等任务完成后由用户确认是否改名。
+	RenameConfirm bool
 }
 
 type BatchDeleteResult struct {

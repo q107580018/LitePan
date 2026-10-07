@@ -18,6 +18,7 @@ import {
   type PanSouItem,
 } from "@/utils/pansou";
 import { loadPansouAccountCapabilities, pansouSaveCandidates } from "@/utils/pansouSave";
+import { primePansouRenameWatch } from "@/utils/pansouRenameConfirm";
 import PanSouSaveModal from "@/components/file/PanSouSaveModal.vue";
 import { asyncAdminPanSouSearch } from "@/utils/pansouAsync";
 
@@ -31,6 +32,7 @@ interface PanSouConfigData {
   token_configured: boolean;
   platforms: string[];
   rename_targets: string[];
+  rename_confirm?: boolean;
 }
 
 const cfg = ref<PanSouConfigData>({
@@ -41,6 +43,7 @@ const cfg = ref<PanSouConfigData>({
   token_configured: false,
   platforms: [],
   rename_targets: [],
+  rename_confirm: false,
 });
 const saving = ref(false);
 const configOpen = ref(false);
@@ -58,6 +61,7 @@ const draft = reactive({
   token: "",
   types: [] as string[],
   renameTargets: [] as string[],
+  renameConfirm: false,
 });
 
 function matches(title: string) {
@@ -112,6 +116,7 @@ function fillDraft(next: PanSouConfigData) {
   draft.token = "";
   draft.types = [...next.platforms];
   draft.renameTargets = [...next.rename_targets];
+  draft.renameConfirm = Boolean(next.rename_confirm);
 }
 
 async function load() {
@@ -125,6 +130,7 @@ async function load() {
       token_configured: Boolean(d.token_configured),
       platforms: normalizePanSouTypes(d.platforms),
       rename_targets: normalizePanSouRenameTargets(d.rename_targets),
+      rename_confirm: Boolean(d.rename_confirm),
     };
   } catch (e) {
     toast.error(getApiErrorMessage(e, "加载 PanSou 设置失败"));
@@ -134,6 +140,8 @@ async function load() {
 onMounted(() => {
   void load();
   void ensureSaveCapabilities();
+  // 刷新页面后继续跟进上一次未确认的重命名。
+  void primePansouRenameWatch();
 });
 
 async function toggleEnabled() {
@@ -147,6 +155,7 @@ async function toggleEnabled() {
       username: cfg.value.username,
       platforms: cfg.value.platforms,
       rename_targets: cfg.value.rename_targets,
+      rename_confirm: Boolean(cfg.value.rename_confirm),
     });
     cfg.value.enabled = next;
     toast.success(
@@ -183,6 +192,7 @@ async function saveConfig() {
       token: draft.token,
       platforms: draft.types,
       rename_targets: draft.renameTargets,
+      rename_confirm: draft.renameConfirm,
     });
     await load();
     toast.success("PanSou 配置已保存，前台搜索将使用新的服务与平台范围");
@@ -373,6 +383,10 @@ function openSave(item: PanSouItem) {
             </button>
           </div>
           <small>仅对单个文件/文件夹生效，多个顶层项自动跳过；磁力/电驴链接的重命名目前仅 115 账号支持。</small>
+          <label class="ps-check">
+            <input v-model="draft.renameConfirm" type="checkbox" />
+            <span>转存完成后弹窗确认重命名（先保留网盘原始名称，再询问是否改成搜索结果标题）</span>
+          </label>
         </div>
 
         <div class="ps-field">
@@ -448,6 +462,7 @@ function openSave(item: PanSouItem) {
       :item="saveItem"
       :candidates="saveItem ? saveCandidates(saveItem) : []"
       :rename-targets="cfg.rename_targets"
+      :rename-confirm="Boolean(cfg.rename_confirm)"
       @close="saveOpen = false"
     />
   </div>
@@ -678,6 +693,19 @@ function openSave(item: PanSouItem) {
   font-size: 12px;
   color: var(--text-muted);
   line-height: 1.5;
+}
+.ps-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-regular);
+  cursor: pointer;
+  line-height: 1.5;
+}
+.ps-check input {
+  margin: 2px 0 0;
+  accent-color: var(--primary);
 }
 @media (max-width: 560px) {
   .ps-test__item {

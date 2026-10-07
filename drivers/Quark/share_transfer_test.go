@@ -134,3 +134,74 @@ func TestParseQuarkShareLinkRejectsOtherHost(t *testing.T) {
 		t.Fatal("非夸克链接应返回错误")
 	}
 }
+
+func TestQuarkShareSaveDefersRenameWhenConfirmRequired(t *testing.T) {
+	listCalls := 0
+	renameCalls := 0
+	d := &Driver{client: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Path {
+		case "/1/clouddrive/share/sharepage/token":
+			return jsonResponse(`{"status":200,"code":0,"data":{"stoken":"secret-stoken"}}`), nil
+		case "/1/clouddrive/share/sharepage/detail":
+			return jsonResponse(`{"status":200,"code":0,"data":{"list":[{"fid":"file-1","file_name":"a.mkv","size":100,"file_type":1,"share_fid_token":"token-1"}]}}`), nil
+		case "/1/clouddrive/file/sort":
+			listCalls++
+			if listCalls == 1 {
+				// 转存前：目标目录只有一个旧文件。
+				return jsonResponse(`{"status":200,"code":0,"data":{"list":[{"fid":"old-1","file_name":"old.mkv","file_type":1}]}}`), nil
+			}
+			// 转存后：目录里新增了 a.mkv。
+			return jsonResponse(`{"status":200,"code":0,"data":{"list":[{"fid":"old-1","file_name":"old.mkv","file_type":1},{"fid":"new-1","file_name":"a.mkv","file_type":1}]}}`), nil
+		case "/1/clouddrive/share/sharepage/save":
+			return jsonResponse(`{"status":200,"code":0,"data":{"task_id":"task-1"}}`), nil
+		case "/1/clouddrive/task":
+			return jsonResponse(`{"status":200,"code":0,"data":{"status":2}}`), nil
+		case "/1/clouddrive/file/rename":
+			renameCalls++
+			return jsonResponse(`{"status":200,"code":0,"data":{}}`), nil
+		default:
+			t.Fatalf("unexpected quark request: %s", req.URL.String())
+			return nil, nil
+		}
+	})}}
+	d.cookie = "sid=test"
+
+	preparation, err := d.PrepareOfflineShare(context.Background(), driver.OfflineSharePrepareRequest{
+		Link: "https://pan.quark.cn/s/abc123", Passcode: "7788",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := d.SaveOfflineShare(context.Background(), driver.OfflineShareSaveRequest{
+		Preparation: *preparation, FileIDs: []string{"file-1"}, ParentID: "target-1",
+		TargetName: "PanSou 标题", DeferRename: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.RenameDeferred || result.Name != "a.mkv" || strings.Contains(result.Name, "PanSou") {
+		t.Fatalf("延迟重命名时应保留原名并回执待确认: %+v", result)
+	}
+	if !strings.Contains(result.Message, "等待确认重命名") {
+		t.Fatalf("延迟重命名应在结果里说明: %+v", result)
+	}
+	if renameCalls != 0 {
+		t.Fatalf("延迟重命名阶段不应调用改名接口，实际 %d 次", renameCalls)
+	}
+
+	updates, err := d.RefreshOfflineTasks(context.Background(), []driver.OfflineTaskRef{{
+		ProviderTaskID: "task-1", ProviderState: result.ProviderState,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updates) != 1 || updates[0].Status != driver.OfflineStatusSuccess {
+		t.Fatalf("延迟重命名任务应正常完成: %+v", updates)
+	}
+	if updates[0].FileID != "new-1" || updates[0].Name != "a.mkv" {
+		t.Fatalf("轮询应回填新增项 id 与原始名称: %+v", updates[0])
+	}
+	if renameCalls != 0 {
+		t.Fatalf("等待确认期间不应自动改名，实际 %d 次", renameCalls)
+	}
+}

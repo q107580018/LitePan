@@ -60,6 +60,7 @@ const (
 	KeyPanSouToken                 = "pansou_token"
 	KeyPanSouPlatforms             = "pansou_platforms"
 	KeyPanSouRenameOnSave          = "pansou_rename_on_save"
+	KeyPanSouRenameConfirm         = "pansou_rename_confirm"
 	KeyLocalUploadEnabled          = "local_upload_enabled"
 	KeyLocalUploadMappings         = "local_upload_mappings"
 	KeyCoverExtractEnabled         = "cover_extract_enabled"
@@ -225,6 +226,7 @@ func defaultSpecs() []Spec {
 		{Key: KeyPanSouToken, Type: TypeString, Category: "pansou", Label: "API Token", Description: "可选的 API Token。", Sensitive: true},
 		stringSpec(KeyPanSouPlatforms, "pansou", "搜索平台", "用逗号分隔平台标识，例如 115,quark,magnet。", "115,quark,magnet,baidu,aliyun,xunlei,tianyi,uc,pikpak"),
 		stringSpec(KeyPanSouRenameOnSave, "pansou", "转存时使用 PanSou 标题重命名", "勾选范围内的转存使用搜索结果标题命名，逗号分隔多选：quark=夸克分享转存，115=115 分享转存，magnet=115 磁力/电驴离线下载；留空表示不重命名。", ""),
+		boolSpec(KeyPanSouRenameConfirm, "pansou", "转存完成后确认重命名", "开启后一键转存先保留网盘原始名称，转存完成后弹窗询问是否改成搜索结果标题。关闭时按上面的范围直接重命名。", "false"),
 		selectSpec(KeyStrmMetadataSyncMode, "strm", "元数据同步策略", "local_primary=保留本地并从云端补缺；cloud_primary=本地目录与云端保持一致；bidirectional=本地与云端互相补缺。", "local_primary", []Option{
 			{Value: "cloud_primary", Label: "网盘元数据为主"},
 			{Value: "local_primary", Label: "本地元数据补缺"},
