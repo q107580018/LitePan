@@ -163,6 +163,82 @@ func TestSpecialPrefixedMovieStaysInOwnDirectory(t *testing.T) {
 	}
 }
 
+func TestSingleSeasonShowDirIsOwnWorkNotParentSeason(t *testing.T) {
+	root := t.TempDir()
+	season := filepath.Join(root, "剧集", "听说很好吃第四季")
+	mustMkdir(t, season)
+	// 父级容器里的残留身份：以前这 12 个 .strm 会被并进「剧集」并套用它的旧 tvshow.nfo。
+	mustWrite(t, filepath.Join(root, "剧集", "tvshow.nfo"), `<title>半熟恋人</title><tmdbid>154420</tmdbid>`)
+	mustWrite(t, filepath.Join(root, "剧集", "poster.jpg"), "x")
+	for i := 1; i <= 12; i++ {
+		mustWrite(t, filepath.Join(season, fmt.Sprintf("听说很好吃.S04E%02d.strm", i)), "x")
+	}
+
+	works, err := scanWorks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(works) != 1 {
+		t.Fatalf("works=%d want 1", len(works))
+	}
+	g := works[0]
+	if g.absDir != season {
+		t.Fatalf("work dir=%q want %q", g.absDir, season)
+	}
+	if g.relKey != filepath.ToSlash(filepath.Join("剧集", "听说很好吃第四季")) {
+		t.Fatalf("relKey=%q", g.relKey)
+	}
+	if got := inferMediaType(g); got != MediaTypeTV {
+		t.Fatalf("media type=%q", got)
+	}
+	item := buildItem(1, root, g)
+	if item.Title != "听说很好吃" || item.MediaType != MediaTypeTV {
+		t.Fatalf("item title/type=%q/%q", item.Title, item.MediaType)
+	}
+	if item.FileCount != 12 {
+		t.Fatalf("file_count=%d", item.FileCount)
+	}
+	// 父级容器的残留身份不得泄漏到这部作品上
+	if item.TMDBID != "" || item.HasNFO {
+		t.Fatalf("leaked parent identity: tmdbid=%q hasNFO=%v", item.TMDBID, item.HasNFO)
+	}
+	if item.ID != pathToItemID(filepath.ToSlash(filepath.Join("剧集", "听说很好吃第四季"))) {
+		t.Fatalf("item id=%q", item.ID)
+	}
+}
+
+func TestSingleSeasonShowDirInsideRealShowCollapsesToShow(t *testing.T) {
+	root := t.TempDir()
+	show := filepath.Join(root, "剧集", "半熟恋人")
+	season := filepath.Join(show, "半熟恋人第四季")
+	mustMkdir(t, season)
+	mustWrite(t, filepath.Join(season, "半熟恋人.S04E01.strm"), "x")
+
+	works, err := scanWorks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(works) != 1 || works[0].absDir != show {
+		t.Fatalf("works=%+v want show root %q", works, show)
+	}
+}
+
+func TestSingleSeasonShowDirAtLibraryRootIsOwnWork(t *testing.T) {
+	root := t.TempDir()
+	season := filepath.Join(root, "听说很好吃第四季")
+	mustMkdir(t, season)
+	mustWrite(t, filepath.Join(season, "听说很好吃.S04E01.strm"), "x")
+	mustWrite(t, filepath.Join(season, "听说很好吃.S04E02.strm"), "x")
+
+	works, err := scanWorks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(works) != 1 || works[0].absDir != season || works[0].flatFile != "" {
+		t.Fatalf("works=%+v want single work at %q", works, season)
+	}
+}
+
 func TestPureSpecialsDirectoryStillCollapsesIntoTVShow(t *testing.T) {
 	root := t.TempDir()
 	show := filepath.Join(root, "剧集", "测试剧 (2023)")

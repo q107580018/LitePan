@@ -89,25 +89,47 @@ func workKeyForStrm(root string, e strmEntry) (relKey, absDir, flatFile string) 
 }
 
 // resolveWorkDir 从 .strm 所在目录向上跳过 Season / 特别篇目录，落到作品根。
+// 「片名.第X季」这类单季作品根（IsSingleSeasonShowDir）先记为候选：外层若还有真正的片名目录
+// 就用外层，只有走到「剧集」这类容器目录或库根时才回落到候选，与 rules.PickTVShowInfo 的候选优先级一致。
+// 否则单季作品根会被当成父级容器的季目录，导致作品被并进容器并沿用容器的旧身份（如残留 tvshow.nfo）。
 func resolveWorkDir(libraryRoot, strmAbs string) string {
-	dir := filepath.Dir(strmAbs)
-	for {
-		if !isInside(libraryRoot, dir) && !sameFilePath(dir, libraryRoot) {
-			return filepath.Dir(strmAbs)
-		}
-		if sameFilePath(dir, libraryRoot) {
-			return libraryRoot
-		}
-		if isStructuralWorkSubdir(dir) {
-			parent := filepath.Dir(dir)
-			if parent == dir || (!isInside(libraryRoot, parent) && !sameFilePath(parent, libraryRoot)) {
+	fileDir := filepath.Dir(strmAbs)
+	dir := fileDir
+	candidate := ""
+	for isInside(libraryRoot, dir) && !sameFilePath(dir, libraryRoot) {
+		name := filepath.Base(dir)
+		switch {
+		case rules.IsSingleSeasonShowDir(name):
+			if candidate == "" {
+				candidate = dir
+			}
+		case !isStructuralWorkSubdir(dir):
+			if candidate == "" || !isWorkContainerDirName(name) {
 				return dir
 			}
-			dir = parent
-			continue
+			return candidate
 		}
-		return dir
+		parent := filepath.Dir(dir)
+		if parent == dir || !isInside(libraryRoot, parent) {
+			break
+		}
+		dir = parent
 	}
+	if candidate != "" {
+		return candidate
+	}
+	if sameFilePath(dir, libraryRoot) {
+		return libraryRoot
+	}
+	return fileDir
+}
+
+// isWorkContainerDirName 判断目录名只是「装作品的容器」（剧集/电影/合集/第X季范围），
+// 它本身不提供作品身份，不能压过内层的单季作品根。
+func isWorkContainerDirName(name string) bool {
+	return rules.IsGenericMediaDir(name) ||
+		rules.IsEpisodeRangeDirName(name) ||
+		rules.IsCollectionContainerDir(name)
 }
 
 func inferMediaType(g workGroup) string {
