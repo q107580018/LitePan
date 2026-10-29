@@ -79,9 +79,9 @@ func TestAddShareDefersRenameUntilConfirmed(t *testing.T) {
 	svc, repo := newOfflineRenameService(t, drv)
 
 	task := addDeferredShare(t, svc, true)
-	// 目标名不下发驱动，只告知驱动需要延迟重命名。
-	if drv.saveRequest.TargetName != "" || !drv.saveRequest.DeferRename {
-		t.Fatalf("延迟重命名时驱动不应拿到目标名: %+v", drv.saveRequest)
+	// 目标名仍要下发给驱动，驱动按 DeferRename 只定位文件、不执行改名。
+	if drv.saveRequest.TargetName != "PanSou 标题" || !drv.saveRequest.DeferRename {
+		t.Fatalf("延迟重命名时驱动应拿到目标名并标记延迟: %+v", drv.saveRequest)
 	}
 	if !task.RenamePending || task.RenameTarget != "PanSou 标题" || task.RenameOrigin != "电影.mkv" {
 		t.Fatalf("任务未携带待确认的重命名: %+v", task)

@@ -230,14 +230,10 @@ func (s *Service) AddShare(ctx context.Context, p AddShareParams) (*Task, error)
 		return nil, err
 	}
 	var result *driver.OfflineShareResult
-	// 「转存完成后确认重命名」：先把目标名留在本地任务上，驱动只负责定位转存后的条目，
-	// 等用户在任务面板里确认（ConfirmRename）后再真正改名。
+	// 「转存完成后确认重命名」：目标名仍下发给驱动，驱动依据 DeferRename 只定位
+	// 转存后的条目而不改名；待确认状态由驱动用 RenameDeferred 回执给服务层。
 	targetName := strings.TrimSpace(p.TargetName)
 	deferRename := p.RenameConfirm && targetName != ""
-	driverTargetName := targetName
-	if deferRename {
-		driverTargetName = ""
-	}
 	err = s.exec.Run(ctx, p.AccountID, func(drv driver.Driver) error {
 		provider, err := driverexec.Require[driver.OfflineShareProvider](drv)
 		if err != nil {
@@ -245,7 +241,7 @@ func (s *Service) AddShare(ctx context.Context, p AddShareParams) (*Task, error)
 		}
 		result, err = provider.SaveOfflineShare(ctx, driver.OfflineShareSaveRequest{
 			Preparation: prepared.value, FileIDs: fileIDs, ParentID: p.TargetParentID,
-			TargetName: driverTargetName, DeferRename: deferRename,
+			TargetName: targetName, DeferRename: deferRename,
 		})
 		return err
 	})
